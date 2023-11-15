@@ -17,6 +17,8 @@ type data struct {
 }
 
 var (
+	encryptionKey = "sign key"
+	nowTime       = time.UnixMilli(1695571200000)
 	defaultExpire = 10 * time.Minute
 	defaultClaims = RegisteredClaims[data]{
 		Data: data{Foo: "1"},
@@ -25,8 +27,6 @@ var (
 			IssuedAt:  jwt.NewNumericDate(nowTime),
 		},
 	}
-	encryptionKey     = "sign key"
-	nowTime           = time.UnixMilli(1695571200000)
 	defaultOption     = NewOptions(defaultExpire, encryptionKey)
 	defaultManagement = NewManagement[data](defaultOption,
 		WithNowFunc[data](func() time.Time {
@@ -444,10 +444,12 @@ func TestManagement_SetClaims(t *testing.T) {
 			v, ok := ctx.Get("claims")
 			if !ok {
 				t.Errorf("claims not found")
+				return
 			}
 			clm, ok := v.(RegisteredClaims[data])
 			if !ok {
 				t.Errorf("claims type error")
+				return
 			}
 			assert.Equal(t, tt.want, clm)
 		})
@@ -786,6 +788,9 @@ func TestWithRefreshJWTOptions(t *testing.T) {
 
 func (m *Management[T]) registerRoutes(server *gin.Engine) {
 	server.GET("/", func(ctx *gin.Context) {
+		ctx.Status(http.StatusOK)
+	})
+	server.GET("/user/:id", func(ctx *gin.Context) {
 		ctx.Status(http.StatusOK)
 	})
 	server.GET("/login", func(ctx *gin.Context) {
