@@ -112,3 +112,8 @@ func main() {
 
 ```
 
+注意:
+- 如需使用 refresh 相关功能必须设置`refreshJWTOptions`。
+- 关于请求头CORS的问题可以查看[cors](https://github.com/gin-contrib/cors)中间件解决。
+- 用户认证中间件默认是根据`Authorization`请求头内容来进行校验。需要在`cors.Config`中配置`AllowHeaders`
+- `Refresh`这个 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`
