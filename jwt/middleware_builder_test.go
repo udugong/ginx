@@ -12,11 +12,12 @@ import (
 
 func TestMiddlewareBuilder_Build(t *testing.T) {
 	type testCase[T any] struct {
-		name        string
-		m           *Management[T]
-		reqBuilder  func(t *testing.T) *http.Request
-		isUseIgnore bool
-		wantCode    int
+		name                string
+		m                   *Management[T]
+		reqBuilder          func(t *testing.T) *http.Request
+		isUseIgnorePath     bool
+		isUseIgnoreFullPath bool
+		wantCode            int
 	}
 	tests := []testCase[data]{
 		{
@@ -76,8 +77,22 @@ func TestMiddlewareBuilder_Build(t *testing.T) {
 				}
 				return req
 			},
-			isUseIgnore: true,
-			wantCode:    http.StatusOK,
+			isUseIgnorePath: true,
+			wantCode:        http.StatusOK,
+		},
+		{
+			// 根据 gin.Context.FullPath 无需认证直接通过
+			name: "pass_without_authentication_by_full_path",
+			m:    NewManagement[data](defaultOption),
+			reqBuilder: func(t *testing.T) *http.Request {
+				req, err := http.NewRequest(http.MethodGet, "/user/1?foo=bar", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return req
+			},
+			isUseIgnoreFullPath: true,
+			wantCode:            http.StatusOK,
 		},
 		{
 			// 未使用忽略选项则进行拦截
@@ -97,8 +112,11 @@ func TestMiddlewareBuilder_Build(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := gin.Default()
 			m := tt.m.MiddlewareBuilder()
-			if tt.isUseIgnore {
+			if tt.isUseIgnorePath {
 				m = m.IgnorePath("/login")
+			}
+			if tt.isUseIgnoreFullPath {
+				m = m.IgnoreFullPath("/user/:id", "/login")
 			}
 			server.Use(m.Build())
 			tt.m.registerRoutes(server)
