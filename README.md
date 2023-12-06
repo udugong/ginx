@@ -10,7 +10,7 @@ go versions
 
 
 
-# use
+# usage
 
 `go get github.com/udugong/ginx`
 
