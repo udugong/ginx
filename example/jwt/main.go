@@ -7,35 +7,41 @@ import (
 	"github.com/gin-gonic/gin"
 
 	ujwt "github.com/udugong/ginx/jwt"
+	"github.com/udugong/ginx/jwt/jwtcore"
 )
 
-type jwtData struct {
+type Claims struct {
 	Uid int64 `json:"uid"`
+	// 嵌入
+	jwtcore.RegisteredClaims
 }
 
 func main() {
 	r := gin.Default()
 
 	accessKey := "access key"
-	m := ujwt.NewManagement[jwtData](ujwt.NewOptions(10*time.Minute, accessKey))
+	// 创建资源令牌管理服务
+	accessTM := jwtcore.NewTokenManagerServer[Claims, *Claims](10*time.Minute, accessKey)
+	// 创建认证中间件构建器
+	builder := ujwt.NewMiddlewareBuilder[Claims, *Claims](accessTM)
 
-	// 登录认证中间件
-	// gloAuthMiddleware := m.MiddlewareBuilder().IgnorePath("/login", "/signup").Build()
-	authMiddleware := m.MiddlewareBuilder().Build()
-
-	// 全局拦截
+	// // 构建全局登录认证中间件
+	// gloAuthMiddleware := builder.
+	// 	// 忽略 "/login", "/signup" 这两个 full path 的认证。
+	// 	IgnoreFullPath("/login", "/signup").Build()
+	// // 全局拦截
 	// r.Use(gloAuthMiddleware)
 
 	// 单独拦截
-	r.GET("/profile", authMiddleware, func(ctx *gin.Context) {
-		ctx.JSON(http.StatusOK, gin.H{"userName": "foo"})
+	r.GET("/profile", builder.Build(), func(ctx *gin.Context) {
+		ctx.Status(http.StatusOK)
 	})
 
 	// 登录设置资源令牌
 	r.POST("/login", func(ctx *gin.Context) {
 		// ...
 		// 如果校验成功
-		token, err := m.GenerateAccessToken(jwtData{Uid: 1})
+		token, err := accessTM.GenerateToken(Claims{Uid: 1})
 		if err != nil {
 			ctx.Status(http.StatusInternalServerError)
 			return
@@ -44,26 +50,23 @@ func main() {
 		ctx.Status(http.StatusNoContent)
 	})
 
-	// 使用刷新令牌相关内容需要设置 refreshJWTOptions
+	// 使用刷新令牌处理函数
 	refreshKey := "refresh key"
-	m = ujwt.NewManagement[jwtData](
-		ujwt.NewOptions(10*time.Minute, accessKey),
-		ujwt.WithRefreshJWTOptions[jwtData](
-			ujwt.NewOptions(7*24*time.Hour, refreshKey)),
-		// 开启轮换刷新令牌(Refresh 的时候会生成一个新的 refresh token)
-		ujwt.WithRotateRefreshToken[jwtData](true),
-	)
+	// 创建刷新令牌的管理服务
+	refreshTM := jwtcore.NewTokenManagerServer[Claims, *Claims](24*time.Hour, refreshKey)
+	// 创建刷新令牌函数的构建器
+	refreshHdlBuilder := ujwt.NewRefreshHandlerBuilder[Claims, *Claims](accessTM, refreshTM)
 
 	// 登录
 	r.POST("/login-v1", func(ctx *gin.Context) {
 		// ...
 		// 如果校验成功
-		accessToken, err := m.GenerateAccessToken(jwtData{Uid: 1})
+		accessToken, err := accessTM.GenerateToken(Claims{Uid: 1})
 		if err != nil {
 			ctx.Status(http.StatusInternalServerError)
 			return
 		}
-		refreshToken, err := m.GenerateRefreshToken(jwtData{Uid: 1})
+		refreshToken, err := refreshTM.GenerateToken(Claims{Uid: 1})
 		if err != nil {
 			ctx.Status(http.StatusInternalServerError)
 			return
@@ -74,7 +77,8 @@ func main() {
 	})
 
 	// 刷新令牌的函数
-	r.POST("/refresh-token", m.Refresh)
+	// 内部已经开启了 refresh 认证,因此可以直接与 relativePath 绑定
+	r.POST("/refresh-token", refreshHdlBuilder.Build)
 
 	r.Run() // 监听并在 0.0.0.0:8080 上启动服务
 }
