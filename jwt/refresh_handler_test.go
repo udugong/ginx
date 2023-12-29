@@ -1,6 +1,8 @@
 package jwt
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,209 +12,214 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/udugong/ginx/jwt/jwtcore"
 )
 
-func TestRefreshHandlerBuilder_Build(t *testing.T) {
-	defaultExpire := 10 * time.Minute
+func TestRefreshManager_Handler(t *testing.T) {
 	accessKey := "access key"
 	refreshKey := "refresh key"
+	defaultExpire := 10 * time.Minute
 	nowTime := time.UnixMilli(1695571200000)
 	accessTM := jwtcore.NewTokenManagerServer[Claims, *Claims](
-		defaultExpire, accessKey,
+		accessKey, defaultExpire,
 		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
 			return nowTime
 		}))
 	refreshTM := jwtcore.NewTokenManagerServer[Claims, *Claims](
-		24*time.Hour, refreshKey,
+		refreshKey, 24*time.Hour,
 		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
 			return nowTime
 		}))
 
 	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
-		name             string
-		h                *RefreshHandlerBuilder[T, PT]
-		reqBuilder       func(t *testing.T) *http.Request
-		wantCode         int
-		wantAccessToken  string
-		wantRefreshToken string
+		name       string
+		h          *RefreshManager[T, PT]
+		reqBuilder func(t *testing.T) *http.Request
+		wantCode   int
+		after      func(t *testing.T, recorder *httptest.ResponseRecorder)
 	}
 	tests := []testCase[Claims, *Claims]{
 		{
 			// 更新资源令牌并轮换刷新令牌
 			name: "refresh_access_token_and_rotate_refresh_token",
-			h: NewRefreshHandlerBuilder[Claims, *Claims](accessTM, refreshTM,
+			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
 				WithRotateRefreshToken[Claims, *Claims](true)),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				req.Header.Add("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzQwMCwiaWF0IjoxNjk1NTcxMDAwfQ.gew4g8GdYdl3COOeHh5AmnnSAA3tgJ8WWkV3GI6cILQ")
 				return req
 			},
-			wantCode:         http.StatusNoContent,
-			wantAccessToken:  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTU3MTgwMCwiaWF0IjoxNjk1NTcxMjAwfQ.Azhc3P_Iks_DRWRZUrZwpKWLiZ9LY7fI0BqhLzOsEgI",
-			wantRefreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzYwMCwiaWF0IjoxNjk1NTcxMjAwfQ.USVVhRntQtzwblLWSrImY2PpxRkYpyxEycMeVc4UVhs",
+			wantCode: http.StatusNoContent,
+			after: func(t *testing.T, recorder *httptest.ResponseRecorder) {
+				accessToken := recorder.Header().Get("x-access-token")
+				refreshToken := recorder.Header().Get("x-refresh-token")
+				assert.Equal(t, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTU3MTgwMCwiaWF0IjoxNjk1NTcxMjAwfQ.Azhc3P_Iks_DRWRZUrZwpKWLiZ9LY7fI0BqhLzOsEgI",
+					accessToken)
+				assert.Equal(t, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzYwMCwiaWF0IjoxNjk1NTcxMjAwfQ.USVVhRntQtzwblLWSrImY2PpxRkYpyxEycMeVc4UVhs",
+					refreshToken)
+			},
 		},
 		{
 			// 更新资源令牌但轮换刷新令牌生成失败
 			name: "refresh_access_token_but_gen_rotate_refresh_token_failed",
-			h: NewRefreshHandlerBuilder[Claims, *Claims](accessTM, &testTokenManager{
+			h: NewRefreshManager[Claims, *Claims](accessTM, &testTokenManager{
 				generateErr:  errors.New("模拟生成 refresh token 失败"),
 				verifyClaims: Claims{Uid: 1},
 				verifyErr:    nil,
 			}, WithRotateRefreshToken[Claims, *Claims](true)),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				req.Header.Add("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzQwMCwiaWF0IjoxNjk1NTcxMDAwfQ.gew4g8GdYdl3COOeHh5AmnnSAA3tgJ8WWkV3GI6cILQ")
 				return req
 			},
 			wantCode: http.StatusInternalServerError,
+			after:    func(t *testing.T, recorder *httptest.ResponseRecorder) {},
 		},
 		{
 			// 仅更新资源令牌
 			name: "refresh_access_token",
-			h:    NewRefreshHandlerBuilder[Claims, *Claims](accessTM, refreshTM),
+			h:    NewRefreshManager[Claims, *Claims](accessTM, refreshTM),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				req.Header.Add("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzQwMCwiaWF0IjoxNjk1NTcxMDAwfQ.gew4g8GdYdl3COOeHh5AmnnSAA3tgJ8WWkV3GI6cILQ")
 				return req
 			},
-			wantCode:        http.StatusNoContent,
-			wantAccessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTU3MTgwMCwiaWF0IjoxNjk1NTcxMjAwfQ.Azhc3P_Iks_DRWRZUrZwpKWLiZ9LY7fI0BqhLzOsEgI",
+			wantCode: http.StatusNoContent,
+			after: func(t *testing.T, recorder *httptest.ResponseRecorder) {
+				accessToken := recorder.Header().Get("x-access-token")
+				assert.Equal(t, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTU3MTgwMCwiaWF0IjoxNjk1NTcxMjAwfQ.Azhc3P_Iks_DRWRZUrZwpKWLiZ9LY7fI0BqhLzOsEgI", accessToken)
+			},
 		},
 		{
 			// 生成资源令牌失败
 			name: "gen_access_token_failed",
-			h: NewRefreshHandlerBuilder[Claims, *Claims](&testTokenManager{
+			h: NewRefreshManager[Claims, *Claims](&testTokenManager{
 				generateErr:  errors.New("模拟生成 access token 失败"),
 				verifyClaims: Claims{Uid: 1},
 			}, refreshTM),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				req.Header.Add("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzQwMCwiaWF0IjoxNjk1NTcxMDAwfQ.gew4g8GdYdl3COOeHh5AmnnSAA3tgJ8WWkV3GI6cILQ")
 				return req
 			},
 			wantCode: http.StatusInternalServerError,
+			after:    func(t *testing.T, recorder *httptest.ResponseRecorder) {},
 		},
 		{
 			// 获取 claims 失败
 			name: "failed_to_obtain_claims",
-			h: &RefreshHandlerBuilder[Claims, *Claims]{
-				refreshAuthHandler: func(c *gin.Context) { return },
-			},
+			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
+				WithRefreshAuthHandler[Claims, *Claims](func(c *gin.Context) {
+					return
+				}),
+			),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				req.Header.Add("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzQwMCwiaWF0IjoxNjk1NTcxMDAwfQ.gew4g8GdYdl3COOeHh5AmnnSAA3tgJ8WWkV3GI6cILQ")
 				return req
 			},
 			wantCode: http.StatusInternalServerError,
+			after:    func(t *testing.T, recorder *httptest.ResponseRecorder) {},
 		},
 		{
 			// 认证失败直接中断执行
 			name: "unauthorized",
-			h: NewRefreshHandlerBuilder[Claims, *Claims](accessTM, refreshTM,
+			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
 				WithRotateRefreshToken[Claims, *Claims](true)),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				req.Header.Add("authorization", "Bearer bad_token")
 				return req
 			},
 			wantCode: http.StatusUnauthorized,
+			after:    func(t *testing.T, recorder *httptest.ResponseRecorder) {},
+		},
+		{
+			name: "change_option",
+			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
+				WithRefreshAuthHandler[Claims, *Claims](
+					NewMiddlewareBuilder[Claims, *Claims](refreshTM).SetClaimsFunc(
+						func(c *gin.Context, claims Claims) {
+							ctx := context.WithValue(c.Request.Context(), "claims", claims)
+							c.Request = c.Request.WithContext(ctx)
+						},
+					).Build(),
+				),
+				WithGetClaims[Claims, *Claims](func(c *gin.Context) (Claims, bool) {
+					v := c.Request.Context().Value("claims")
+					clm, ok := v.(Claims)
+					return clm, ok
+				}),
+				WithAccessTokenSetter[Claims, *Claims](func(c *gin.Context, token string) {
+					ctx := context.WithValue(c.Request.Context(), "access-token", token)
+					c.Request = c.Request.WithContext(ctx)
+				}),
+				WithRotateRefreshToken[Claims, *Claims](true),
+				WithRefreshTokenSetter[Claims, *Claims](func(c *gin.Context, token string) {
+					ctx := context.WithValue(c.Request.Context(), "refresh-token", token)
+					c.Request = c.Request.WithContext(ctx)
+				}),
+				WithResponseSetter[Claims, *Claims](func(c *gin.Context) {
+					v1 := c.Request.Context().Value("access-token")
+					accessToken, ok := v1.(string)
+					if !ok {
+						c.Status(http.StatusInternalServerError)
+						return
+					}
+
+					v2 := c.Request.Context().Value("refresh-token")
+					refreshToken, ok := v2.(string)
+					if !ok {
+						c.Status(http.StatusInternalServerError)
+						return
+					}
+
+					c.JSON(http.StatusOK, gin.H{
+						"access_token":  accessToken,
+						"refresh_token": refreshToken,
+					})
+				}),
+			),
+			reqBuilder: func(t *testing.T) *http.Request {
+				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
+				require.NoError(t, err)
+				req.Header.Add("authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzQwMCwiaWF0IjoxNjk1NTcxMDAwfQ.gew4g8GdYdl3COOeHh5AmnnSAA3tgJ8WWkV3GI6cILQ")
+				return req
+			},
+			wantCode: http.StatusOK,
+			after: func(t *testing.T, recorder *httptest.ResponseRecorder) {
+				respMap := map[string]string{
+					"access_token":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTU3MTgwMCwiaWF0IjoxNjk1NTcxMjAwfQ.Azhc3P_Iks_DRWRZUrZwpKWLiZ9LY7fI0BqhLzOsEgI",
+					"refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEsImV4cCI6MTY5NTY1NzYwMCwiaWF0IjoxNjk1NTcxMjAwfQ.USVVhRntQtzwblLWSrImY2PpxRkYpyxEycMeVc4UVhs",
+				}
+				b, err := json.Marshal(respMap)
+				assert.NoError(t, err)
+				assert.Equal(t, string(b), recorder.Body.String())
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server := gin.Default()
-			server.GET("/refresh", tt.h.Build)
+			server.GET("/refresh", tt.h.Handler)
 
 			req := tt.reqBuilder(t)
 			recorder := httptest.NewRecorder()
 
 			server.ServeHTTP(recorder, req)
 			assert.Equal(t, tt.wantCode, recorder.Code)
-			if tt.wantCode != http.StatusNoContent {
+			if tt.wantCode != recorder.Code {
 				return
 			}
-			assert.Equal(t, tt.wantAccessToken,
-				recorder.Header().Get("x-access-token"))
-			assert.Equal(t, tt.wantRefreshToken,
-				recorder.Header().Get("x-refresh-token"))
-		})
-	}
-}
-
-func TestWithExposeAccessHeader(t *testing.T) {
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
-		name string
-		fn   func() Option[T, PT]
-		want string
-	}
-	tests := []testCase[Claims, *Claims]{
-		{
-			name: "normal",
-			fn:   withNop[Claims, *Claims],
-			want: "x-access-token",
-		},
-		{
-			name: "set_another_access_token",
-			fn: func() Option[Claims, *Claims] {
-				return WithExposeAccessHeader[Claims, *Claims]("access-token")
-			},
-			want: "access-token",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NewRefreshHandlerBuilder[Claims, *Claims](
-				nil, nil, tt.fn()).exposeAccessHeader
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestWithExposeRefreshHeader(t *testing.T) {
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
-		name string
-		fn   func() Option[T, PT]
-		want string
-	}
-	tests := []testCase[Claims, *Claims]{
-		{
-			name: "normal",
-			fn:   withNop[Claims, *Claims],
-			want: "x-refresh-token",
-		},
-		{
-			name: "set_another_refresh-token",
-			fn: func() Option[Claims, *Claims] {
-				return WithExposeRefreshHeader[Claims, *Claims]("refresh-token")
-			},
-			want: "refresh-token",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := NewRefreshHandlerBuilder[Claims, *Claims](
-				nil, nil, tt.fn()).exposeRefreshHeader
-			assert.Equal(t, tt.want, got)
+			tt.after(t, recorder)
 		})
 	}
 }
@@ -230,8 +237,4 @@ func (m *testTokenManager) GenerateToken(_ Claims) (string, error) {
 
 func (m *testTokenManager) VerifyToken(_ string, _ ...jwt.ParserOption) (Claims, error) {
 	return m.verifyClaims, m.verifyErr
-}
-
-func withNop[T jwt.Claims, PT jwtcore.Claims[T]]() Option[T, PT] {
-	return optionFunc[T, PT](func(r *RefreshHandlerBuilder[T, PT]) {})
 }

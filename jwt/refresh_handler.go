@@ -10,73 +10,123 @@ import (
 	"github.com/udugong/ginx/jwt/jwtcore"
 )
 
-// RefreshHandlerBuilder 定义刷新令牌的 gin.HandlerFunc 构建器.
-// accessTM: 资源令牌管理
-// refreshTM: 刷新令牌管理
-// rotateRefreshToken: 是否轮换刷新令牌。默认为 false
-// exposeAccessHeader: 暴露到外部的资源令牌的请求头。默认为 x-access-token
-// exposeRefreshHeader: 暴露到外部的刷新令牌的请求头。默认为 x-refresh-token
-// refreshAuthHandler: 刷新令牌认证的处理函数。默认使用 refreshTM 作为参数创建的 MiddlewareBuilder 进行认证
-type RefreshHandlerBuilder[T jwt.Claims, PT jwtcore.Claims[T]] struct {
-	accessTM            jwtcore.TokenManager[T, PT]
-	refreshTM           jwtcore.TokenManager[T, PT]
-	rotateRefreshToken  bool   // 是否轮换刷新令牌
-	exposeAccessHeader  string // 暴露到外部的资源请求头
-	exposeRefreshHeader string // 暴露到外部的刷新请求头
-	refreshAuthHandler  gin.HandlerFunc
+// RefreshManager 定义刷新令牌管理器.
+type RefreshManager[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	// accessTM 资源令牌管理.
+	accessTM jwtcore.TokenManager[T, PT]
+
+	// refreshTM 刷新令牌管理.
+	refreshTM jwtcore.TokenManager[T, PT]
+
+	// rotateRefreshToken 是否轮换刷新令牌.
+	// 默认为 false.
+	rotateRefreshToken bool
+
+	// refreshAuthHandler 认证的处理函数.
+	// 默认使用 refreshTM 作为参数创建的 MiddlewareBuilder 进行认证.
+	refreshAuthHandler gin.HandlerFunc
+
+	// getClaims 获取 Claims.
+	// 如果更改了 refreshAuthHandler 中设置 Claims 的方法,则需要匹配 setClaims 来获取.
+	getClaims func(*gin.Context) (T, bool)
+
+	// accessTokenSetterFn 资源令牌设置函数.
+	// 默认把 access token 设置到 key="x-access-token" 的请求头中.
+	accessTokenSetterFn TokenSetterFunc
+
+	// refreshTokenSetterFn 刷新令牌设置函数.
+	// 默认把 refresh token 设置到 key="x-refresh-token" 的请求头中.
+	refreshTokenSetterFn TokenSetterFunc
+
+	// responseHandler 响应函数.
+	// 默认返回 HTTP 响应码为 204 的响应.
+	responseHandler gin.HandlerFunc
 }
 
-// NewRefreshHandlerBuilder 创建一个刷新令牌的 gin.HandlerFunc 构建器.
-func NewRefreshHandlerBuilder[T jwt.Claims, PT jwtcore.Claims[T]](
+// TokenSetterFunc 令牌设置函数.
+// 设置 token 到 gin.Context 中.
+type TokenSetterFunc func(c *gin.Context, token string)
+
+// NewRefreshManager 创建一个刷新令牌管理器.
+func NewRefreshManager[T jwt.Claims, PT jwtcore.Claims[T]](
 	accessTM jwtcore.TokenManager[T, PT], refreshTM jwtcore.TokenManager[T, PT],
-	options ...Option[T, PT]) *RefreshHandlerBuilder[T, PT] {
-	builder := &RefreshHandlerBuilder[T, PT]{
-		accessTM:            accessTM,
-		refreshTM:           refreshTM,
-		rotateRefreshToken:  false,
-		exposeAccessHeader:  "x-access-token",
-		exposeRefreshHeader: "x-refresh-token",
-		refreshAuthHandler:  NewMiddlewareBuilder[T, PT](refreshTM).Build(),
+	options ...Option[T, PT]) *RefreshManager[T, PT] {
+	m := &RefreshManager[T, PT]{
+		accessTM:           accessTM,
+		refreshTM:          refreshTM,
+		rotateRefreshToken: false,
 	}
-	return builder.WithOptions(options...)
+	m.refreshAuthHandler = NewMiddlewareBuilder[T, PT](refreshTM).Build()
+	m.getClaims = func(c *gin.Context) (T, bool) {
+		v, ok := c.Get(claimsKey)
+		clm, ok := v.(T)
+		return clm, ok
+	}
+	m.accessTokenSetterFn = func(c *gin.Context, token string) {
+		c.Header("x-access-token", token)
+	}
+	m.refreshTokenSetterFn = func(c *gin.Context, token string) {
+		c.Header("x-refresh-token", token)
+	}
+	m.responseHandler = func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	}
+	return m.WithOptions(options...)
 }
 
 type Option[T jwt.Claims, PT jwtcore.Claims[T]] interface {
-	apply(*RefreshHandlerBuilder[T, PT])
+	apply(*RefreshManager[T, PT])
 }
 
-type optionFunc[T jwt.Claims, PT jwtcore.Claims[T]] func(*RefreshHandlerBuilder[T, PT])
+type optionFunc[T jwt.Claims, PT jwtcore.Claims[T]] func(*RefreshManager[T, PT])
 
-func (f optionFunc[T, PT]) apply(rh *RefreshHandlerBuilder[T, PT]) {
-	f(rh)
+func (f optionFunc[T, PT]) apply(m *RefreshManager[T, PT]) {
+	f(m)
 }
 
 func WithRotateRefreshToken[T jwt.Claims, PT jwtcore.Claims[T]](isRotate bool) Option[T, PT] {
-	return optionFunc[T, PT](func(rh *RefreshHandlerBuilder[T, PT]) {
-		rh.rotateRefreshToken = isRotate
+	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+		m.rotateRefreshToken = isRotate
 	})
 }
 
-func WithExposeAccessHeader[T jwt.Claims, PT jwtcore.Claims[T]](header string) Option[T, PT] {
-	return optionFunc[T, PT](func(rh *RefreshHandlerBuilder[T, PT]) {
-		rh.exposeAccessHeader = header
+func WithRefreshAuthHandler[T jwt.Claims, PT jwtcore.Claims[T]](fn gin.HandlerFunc) Option[T, PT] {
+	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+		m.refreshAuthHandler = fn
 	})
 }
 
-func WithExposeRefreshHeader[T jwt.Claims, PT jwtcore.Claims[T]](header string) Option[T, PT] {
-	return optionFunc[T, PT](func(rh *RefreshHandlerBuilder[T, PT]) {
-		rh.exposeRefreshHeader = header
+func WithGetClaims[T jwt.Claims, PT jwtcore.Claims[T]](fn func(*gin.Context) (T, bool)) Option[T, PT] {
+	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+		m.getClaims = fn
 	})
 }
 
-// Build 构建 gin.HandlerFunc.
-func (rh *RefreshHandlerBuilder[T, PT]) Build(c *gin.Context) {
-	rh.refreshAuthHandler(c)
+func WithAccessTokenSetter[T jwt.Claims, PT jwtcore.Claims[T]](fn TokenSetterFunc) Option[T, PT] {
+	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+		m.accessTokenSetterFn = fn
+	})
+}
+
+func WithRefreshTokenSetter[T jwt.Claims, PT jwtcore.Claims[T]](fn TokenSetterFunc) Option[T, PT] {
+	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+		m.refreshTokenSetterFn = fn
+	})
+}
+
+func WithResponseSetter[T jwt.Claims, PT jwtcore.Claims[T]](fn gin.HandlerFunc) Option[T, PT] {
+	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+		m.responseHandler = fn
+	})
+}
+
+// Handler 刷新令牌的 gin.HandlerFunc.
+func (m *RefreshManager[T, PT]) Handler(c *gin.Context) {
+	m.refreshAuthHandler(c)
 	if c.IsAborted() {
 		return
 	}
-	v, ok := c.Get(claimsKey)
-	clm, ok := v.(T)
+	clm, ok := m.getClaims(c)
 	if !ok {
 		// 不应该命中该分支
 		c.Status(http.StatusInternalServerError)
@@ -84,37 +134,37 @@ func (rh *RefreshHandlerBuilder[T, PT]) Build(c *gin.Context) {
 		return
 	}
 
-	accessToken, err := rh.accessTM.GenerateToken(clm)
+	accessToken, err := m.accessTM.GenerateToken(clm)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		log.Printf("生成 access token 失败; err: %v", err)
 		return
 	}
 
-	c.Header(rh.exposeAccessHeader, accessToken)
+	m.accessTokenSetterFn(c, accessToken)
 
 	// 轮换刷新令牌
-	if rh.rotateRefreshToken {
-		refreshToken, err := rh.refreshTM.GenerateToken(clm)
+	if m.rotateRefreshToken {
+		refreshToken, err := m.refreshTM.GenerateToken(clm)
 		if err != nil {
 			c.Status(http.StatusInternalServerError)
 			log.Printf("生成 refresh token 失败; err: %v", err)
 			return
 		}
-		c.Header(rh.exposeRefreshHeader, refreshToken)
+		m.refreshTokenSetterFn(c, refreshToken)
 	}
-	c.Status(http.StatusNoContent)
+	m.responseHandler(c)
 }
 
-func (rh *RefreshHandlerBuilder[T, PT]) WithOptions(opts ...Option[T, PT]) *RefreshHandlerBuilder[T, PT] {
-	c := rh.clone()
+func (m *RefreshManager[T, PT]) WithOptions(opts ...Option[T, PT]) *RefreshManager[T, PT] {
+	c := m.clone()
 	for _, opt := range opts {
 		opt.apply(c)
 	}
 	return c
 }
 
-func (rh *RefreshHandlerBuilder[T, PT]) clone() *RefreshHandlerBuilder[T, PT] {
-	copyHandler := *rh
+func (m *RefreshManager[T, PT]) clone() *RefreshManager[T, PT] {
+	copyHandler := *m
 	return &copyHandler
 }
