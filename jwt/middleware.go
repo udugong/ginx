@@ -19,16 +19,21 @@ const (
 
 // MiddlewareBuilder 定义认证的中间件构建器.
 type MiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]] struct {
-	ignorePath   func(*gin.Context) bool   // Middleware 中忽略认证路径的方法
-	extractToken func(*gin.Context) string // Middleware 中提取 token 字符串的方法
-	setClaims    func(*gin.Context, T)     // Middleware 中设置 Claims 的方法
+	// Middleware 中忽略认证路径的方法.
+	// 默认使用 func(*gin.Context) bool { return false } 也就是全部不忽略.
+	ignorePath func(*gin.Context) bool
+
+	// Middleware 中提取 token 字符串的方法.
+	// 默认从 authorization 请求头中,获取按 Bearer 分割获取.
+	extractToken func(*gin.Context) string
+
+	// Middleware 中设置 Claims 的方法.
+	// 默认设置到 key="claims" 的 gin.Context 中.
+	setClaims func(*gin.Context, T)
 	jwtcore.TokenManager[T, PT]
 }
 
 // NewMiddlewareBuilder 创建一个认证的中间件构建器.
-// ignorePath: 默认使用 func(*gin.Context) bool { return false } 也就是全部不忽略.
-// extractToken: 默认从 authorization 请求头中获取按 Bearer 分割.
-// setClaims: 默认设置到 key="claims" 的 gin.Context 中.
 func NewMiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]](
 	m jwtcore.TokenManager[T, PT]) *MiddlewareBuilder[T, PT] {
 	return &MiddlewareBuilder[T, PT]{
