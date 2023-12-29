@@ -17,6 +17,7 @@ func TestWithDecryptKey(t *testing.T) {
 	tests := []testCase[MyClaims, *MyClaims]{
 		{
 			name: "normal",
+			fn:   withNop[MyClaims, *MyClaims],
 			want: encryptionKey,
 		},
 		{
@@ -29,14 +30,8 @@ func TestWithDecryptKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got string
-			if tt.fn == nil {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey).DecryptKey
-			} else {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey, tt.fn()).DecryptKey
-			}
+			got := NewTokenManagerServer[MyClaims, *MyClaims](
+				encryptionKey, defaultExpire, tt.fn()).DecryptKey
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -51,6 +46,7 @@ func TestWithGenIDFunc(t *testing.T) {
 	tests := []testCase[MyClaims, *MyClaims]{
 		{
 			name: "normal",
+			fn:   withNop[MyClaims, *MyClaims],
 			want: "",
 		},
 		{
@@ -65,14 +61,8 @@ func TestWithGenIDFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got string
-			if tt.fn == nil {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey).genIDFn()
-			} else {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey, tt.fn()).genIDFn()
-			}
+			got := NewTokenManagerServer[MyClaims, *MyClaims](
+				encryptionKey, defaultExpire, tt.fn()).genIDFn()
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -87,6 +77,7 @@ func TestWithIssuer(t *testing.T) {
 	tests := []testCase[MyClaims, *MyClaims]{
 		{
 			name: "normal",
+			fn:   withNop[MyClaims, *MyClaims],
 			want: "",
 		},
 		{
@@ -99,14 +90,8 @@ func TestWithIssuer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got string
-			if tt.fn == nil {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey).Issuer
-			} else {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey, tt.fn()).Issuer
-			}
+			got := NewTokenManagerServer[MyClaims, *MyClaims](
+				encryptionKey, defaultExpire, tt.fn()).Issuer
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -121,6 +106,7 @@ func TestWithMethod(t *testing.T) {
 	tests := []testCase[MyClaims, *MyClaims]{
 		{
 			name: "normal",
+			fn:   withNop[MyClaims, *MyClaims],
 			want: jwt.SigningMethodHS256,
 		},
 		{
@@ -133,14 +119,8 @@ func TestWithMethod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got jwt.SigningMethod
-			if tt.fn == nil {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey).Method
-			} else {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey, tt.fn()).Method
-			}
+			got := NewTokenManagerServer[MyClaims, *MyClaims](
+				encryptionKey, defaultExpire, tt.fn()).Method
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -165,15 +145,13 @@ func TestWithTimeFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got int64
-			if tt.fn == nil {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey).timeFunc().UnixMilli()
-			} else {
-				got = NewTokenManagerServer[MyClaims, *MyClaims](
-					defaultExpire, encryptionKey, tt.fn()).timeFunc().UnixMilli()
-			}
+			got := NewTokenManagerServer[MyClaims, *MyClaims](
+				encryptionKey, defaultExpire, tt.fn()).timeFunc().UnixMilli()
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func withNop[T jwt.Claims, PT Claims[T]]() Option[T, PT] {
+	return optionFunc[T, PT](func(m *TokenManagerServer[T, PT]) {})
 }

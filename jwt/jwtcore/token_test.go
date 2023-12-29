@@ -40,7 +40,7 @@ func TestNewTokenHandler(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := NewTokenManagerServer[MyClaims, *MyClaims](tt.expire, tt.encryptionKey)
+			got := NewTokenManagerServer[MyClaims, *MyClaims](tt.encryptionKey, tt.expire)
 			got.genIDFn = genIDFn
 			got.timeFunc = timeFn
 			assert.Equal(t, tt.want, got)
@@ -92,7 +92,7 @@ func TestTokenHandler_VerifyToken(t *testing.T) {
 		{
 			// token 过期了
 			name: "token_expired",
-			h: NewTokenManagerServer[MyClaims, *MyClaims](defaultExpire, encryptionKey,
+			h: NewTokenManagerServer[MyClaims, *MyClaims](encryptionKey, defaultExpire,
 				WithTimeFunc[MyClaims, *MyClaims](func() time.Time {
 					return time.UnixMilli(1695671200000)
 				}),
@@ -139,7 +139,7 @@ var (
 		},
 	}
 	defaultHandler = NewTokenManagerServer[MyClaims, *MyClaims](
-		defaultExpire, encryptionKey,
+		encryptionKey, defaultExpire,
 		WithTimeFunc[MyClaims, *MyClaims](func() time.Time {
 			return nowTime
 		}),
