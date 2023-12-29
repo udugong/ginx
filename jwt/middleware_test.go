@@ -321,7 +321,7 @@ func TestMiddlewareBuilder_IgnoreFullPath(t *testing.T) {
 
 var (
 	tokenManager = jwtcore.NewTokenManagerServer[Claims, *Claims](
-		10*time.Minute, "sign key",
+		"sign key", 10*time.Minute,
 		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
 			return time.UnixMilli(1695571200000)
 		}))
