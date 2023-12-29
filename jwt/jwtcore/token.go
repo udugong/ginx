@@ -14,18 +14,11 @@ type TokenManager[T jwt.Claims, PT Claims[T]] interface {
 }
 
 // TokenManagerServer 定义 jwt token 的处理程序.
-// Expire: 有效期.
-// EncryptionKey: 加密密钥.
-// DecryptKey: 解密密钥.
-// Method: 签名方式.
-// Issuer: 签发人.
-// genIDFn: 生成 JWT ID (jti) 的函数.
-// timeFunc: 控制 jwt 的时间.
 type TokenManagerServer[T jwt.Claims, PT Claims[T]] struct {
-	Expire        time.Duration     // 有效期
 	EncryptionKey string            // 加密密钥
 	DecryptKey    string            // 解密密钥
 	Method        jwt.SigningMethod // 签名方式
+	Expire        time.Duration     // 有效期
 	Issuer        string            // 签发人
 	genIDFn       func() string     // 生成 JWT ID (jti) 的函数
 	timeFunc      func() time.Time  // 控制 jwt 的时间
@@ -34,8 +27,8 @@ type TokenManagerServer[T jwt.Claims, PT Claims[T]] struct {
 // NewTokenManagerServer 创建一个 jwt token 的处理服务.
 // Method: 默认使用 jwt.SigningMethodHS256 对称签名方式.
 // DecryptKey: 默认与 EncryptionKey 相同.
-func NewTokenManagerServer[T jwt.Claims, PT Claims[T]](expire time.Duration,
-	encryptionKey string, options ...Option[T, PT]) *TokenManagerServer[T, PT] {
+func NewTokenManagerServer[T jwt.Claims, PT Claims[T]](encryptionKey string,
+	expire time.Duration, options ...Option[T, PT]) *TokenManagerServer[T, PT] {
 	manager := &TokenManagerServer[T, PT]{
 		Expire:        expire,
 		EncryptionKey: encryptionKey,
