@@ -15,6 +15,7 @@ Go Versions
 下载安装：`go get github.com/udugong/ginx`
 
   * [jwt 的使用](#jwt-package)
+  * [ratelimit 限流](#ratelimit-限流)
 
 
 
@@ -119,4 +120,57 @@ func main() {
 - 关于请求头CORS的问题可以查看[cors](https://github.com/gin-contrib/cors)中间件解决。
 - 用户认证中间件默认是根据`Authorization`请求头内容来进行校验。需要在`cors.Config`中配置`AllowHeaders`。
 - `RefreshManager`中的 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`。
+
+
+
+# `ratelimit` 限流
+
+ratelimit 是基于 `redis` 实现的滑动窗口限流器。它为 gin 提供了限流中间件，使您快速完成针对 IP 的限流，您也可以设置不同的 key 来实现不同的限流。
+
+```go
+package main
+
+import (
+	"context"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/udugong/ginx/middlewares/ratelimit"
+)
+
+func main() {
+	rdb := InitRedis()
+	// 创建一个基于 redis, 1000/s 的限流器
+	limiter := ratelimit.NewRedisSlidingWindowLimiter(rdb, time.Second, 1000)
+	builder := ratelimit.NewBuilder(limiter)
+
+	r := gin.Default()
+	// 控制所有的请求的速率
+	r.Use(builder.SetKeyGenFunc(func(*gin.Context) string {
+		return "all-request" // 设置 redis 的 key
+	}).Build())
+
+	// 默认是根据 IP 限流
+	// 每个 IP 每秒 最多访问 1000次
+	r.Use(builder.Build())
+}
+
+func InitRedis() redis.Cmdable {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		panic(err)
+	}
+	return rdb
+}
+
+```
 
