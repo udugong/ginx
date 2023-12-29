@@ -1,18 +1,18 @@
-# ginx
+# Ginx
 gin的插件
 
 
 
-go versions
+Go Versions
 ==================
 
 `>=1.20`
 
 
 
-# usage
+# Usage
 
-`go get github.com/udugong/ginx`
+下载安装：`go get github.com/udugong/ginx`
 
   * [jwt 的使用](#jwt-package)
 
@@ -23,10 +23,9 @@ go versions
 该`jwt`包提供了一些有用的方法，使您可以在使用 gin 时快速完成认证功能。
 
 - 利用泛型可以自定义 claims 内容
+- 生成/校验 token（在 `jwtcore` 包中）
 - 登录认证中间件
-- 生成/校验 access token
-- 生成/校验 refresh token
-- 刷新 access token 的 handler
+- 刷新 token 的 gin.HandlerFunc
 
 ```go
 package main
@@ -38,74 +37,78 @@ import (
 	"github.com/gin-gonic/gin"
 
 	ujwt "github.com/udugong/ginx/jwt"
+	"github.com/udugong/ginx/jwt/jwtcore"
 )
 
-type jwtData struct {
+type Claims struct {
 	Uid int64 `json:"uid"`
+	// 嵌入
+	jwtcore.RegisteredClaims
 }
 
 func main() {
 	r := gin.Default()
 
 	accessKey := "access key"
-	m := ujwt.NewManagement[jwtData](ujwt.NewOptions(10*time.Minute, accessKey))
+	// 创建资源令牌管理服务
+	accessTM := jwtcore.NewTokenManagerServer[Claims, *Claims](accessKey, 10*time.Minute)
+	// 创建认证中间件构建器
+	builder := ujwt.NewMiddlewareBuilder[Claims, *Claims](accessTM)
 
-	// 登录认证中间件
-	// gloAuthMiddleware := m.MiddlewareBuilder().IgnorePath("/login", "/signup").Build()
-	authMiddleware := m.MiddlewareBuilder().Build()
-
-	// 全局拦截
+	// // 构建全局登录认证中间件
+	// gloAuthMiddleware := builder.
+	// 	// 忽略 "/login", "/signup" 这两个 full path 的认证。
+	// 	IgnoreFullPath("/login", "/signup").Build()
+	// // 全局拦截
 	// r.Use(gloAuthMiddleware)
 
 	// 单独拦截
-	r.GET("/profile", authMiddleware, func(ctx *gin.Context) {
-		ctx.JSON(http.StatusOK, gin.H{"userName": "foo"})
+	r.GET("/profile", builder.Build(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
 	})
 
 	// 登录设置资源令牌
-	r.POST("/login", func(ctx *gin.Context) {
+	r.POST("/login", func(c *gin.Context) {
 		// ...
 		// 如果校验成功
-		token, err := m.GenerateAccessToken(jwtData{Uid: 1})
+		token, err := accessTM.GenerateToken(Claims{Uid: 1})
 		if err != nil {
-			ctx.Status(http.StatusInternalServerError)
+			c.Status(http.StatusInternalServerError)
 			return
 		}
-		ctx.Header("x-access-token", token)
-		ctx.Status(http.StatusNoContent)
+		c.Header("x-access-token", token)
+		c.Status(http.StatusNoContent)
 	})
 
-	// 使用刷新令牌相关内容需要设置 refreshJWTOptions
+	// 使用刷新令牌处理函数
 	refreshKey := "refresh key"
-	m = ujwt.NewManagement[jwtData](
-		ujwt.NewOptions(10*time.Minute, accessKey),
-		ujwt.WithRefreshJWTOptions[jwtData](
-			ujwt.NewOptions(7*24*time.Hour, refreshKey)),
-		// 开启轮换刷新令牌(Refresh 的时候会生成一个新的 refresh token)
-		ujwt.WithRotateRefreshToken[jwtData](true),
-	)
+	// 创建刷新令牌的管理服务
+	refreshTM := jwtcore.NewTokenManagerServer[Claims, *Claims](refreshKey, 24*time.Hour)
+	// 创建刷新令牌函数的构建器
+	refreshManager := ujwt.NewRefreshManager[Claims, *Claims](accessTM, refreshTM)
 
 	// 登录
-	r.POST("/login-v1", func(ctx *gin.Context) {
+	r.POST("/login-v1", func(c *gin.Context) {
 		// ...
 		// 如果校验成功
-		accessToken, err := m.GenerateAccessToken(jwtData{Uid: 1})
+		accessToken, err := accessTM.GenerateToken(Claims{Uid: 1})
 		if err != nil {
-			ctx.Status(http.StatusInternalServerError)
+			c.Status(http.StatusInternalServerError)
 			return
 		}
-		refreshToken, err := m.GenerateRefreshToken(jwtData{Uid: 1})
+		refreshToken, err := refreshTM.GenerateToken(Claims{Uid: 1})
 		if err != nil {
-			ctx.Status(http.StatusInternalServerError)
+			c.Status(http.StatusInternalServerError)
 			return
 		}
-		ctx.Header("x-access-token", accessToken)
-		ctx.Header("x-refresh-token", refreshToken)
-		ctx.Status(http.StatusNoContent)
+		c.Header("x-access-token", accessToken)
+		c.Header("x-refresh-token", refreshToken)
+		c.Status(http.StatusNoContent)
 	})
 
 	// 刷新令牌的函数
-	r.POST("/refresh-token", m.Refresh)
+	// 内部已经开启了 refresh 令牌的认证,因此可以直接使用 refreshManager.Handler 与 relativePath 绑定
+	r.POST("/refresh-token", refreshManager.Handler)
 
 	r.Run() // 监听并在 0.0.0.0:8080 上启动服务
 }
@@ -113,7 +116,7 @@ func main() {
 ```
 
 注意:
-- 如需使用 refresh 相关功能必须设置`refreshJWTOptions`。
 - 关于请求头CORS的问题可以查看[cors](https://github.com/gin-contrib/cors)中间件解决。
-- 用户认证中间件默认是根据`Authorization`请求头内容来进行校验。需要在`cors.Config`中配置`AllowHeaders`
-- `Refresh`这个 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`
+- 用户认证中间件默认是根据`Authorization`请求头内容来进行校验。需要在`cors.Config`中配置`AllowHeaders`。
+- `RefreshManager`中的 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`。
+
