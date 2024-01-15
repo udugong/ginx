@@ -66,6 +66,14 @@ func main() {
 	// 单独拦截
 	r.GET("/profile", builder.Build(), func(c *gin.Context) {
 		c.Status(http.StatusOK)
+
+		// 获取 claims
+		v, _ := c.Get("claims") // 默认存放在 key = "claims" 的 gin.Context 中.
+		clm, ok := v.(Claims)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, "不应该命中该分支")
+		}
+		fmt.Println(clm.Uid) // 获取 Uid
 	})
 
 	// 登录设置资源令牌
