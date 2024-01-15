@@ -65,15 +65,15 @@ func main() {
 
 	// 单独拦截
 	r.GET("/profile", builder.Build(), func(c *gin.Context) {
-		c.Status(http.StatusOK)
-
 		// 获取 claims
 		v, _ := c.Get("claims") // 默认存放在 key = "claims" 的 gin.Context 中.
 		clm, ok := v.(Claims)
 		if !ok {
 			c.JSON(http.StatusInternalServerError, "不应该命中该分支")
+			return
 		}
 		fmt.Println(clm.Uid) // 获取 Uid
+		c.Status(http.StatusOK)
 	})
 
 	// 登录设置资源令牌
@@ -127,7 +127,7 @@ func main() {
 注意:
 - 关于请求头CORS的问题可以查看[cors](https://github.com/gin-contrib/cors)中间件解决。
 - 用户认证中间件默认是根据`Authorization`请求头内容来进行校验。需要在`cors.Config`中配置`AllowHeaders`。
-- `RefreshManager`中的 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`。
+- `RefreshManager`中的 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`前端才能正常获取。
 
 
 
