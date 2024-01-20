@@ -6,12 +6,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-
-	"github.com/udugong/ginx/internal/ratelimit"
 )
 
 type Builder struct {
-	limiter  ratelimit.Limiter
+	limiter  Limiter
 	genKeyFn func(ctx *gin.Context) string
 	logFn    func(msg any, args ...any)
 }
@@ -19,7 +17,7 @@ type Builder struct {
 // NewBuilder
 // genKeyFn: 默认使用 IP 限流.
 // logFn: 默认使用 log.Println().
-func NewBuilder(limiter ratelimit.Limiter) *Builder {
+func NewBuilder(limiter Limiter) *Builder {
 	return &Builder{
 		limiter: limiter,
 		genKeyFn: func(ctx *gin.Context) string {
