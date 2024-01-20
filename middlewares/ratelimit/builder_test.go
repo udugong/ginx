@@ -1,18 +1,14 @@
 package ratelimit
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/mock/gomock"
-
-	"github.com/udugong/ginx/internal/ratelimit"
-	limitmocks "github.com/udugong/ginx/internal/ratelimit/mocks"
 )
 
 func TestBuilder_SetKeyGenFunc(t *testing.T) {
@@ -71,24 +67,21 @@ func TestBuilder_SetKeyGenFunc(t *testing.T) {
 
 func TestBuilder_Build(t *testing.T) {
 	const limitURL = "/limit"
+	testLimiter := &testLimiter{}
+	svc := NewBuilder(testLimiter)
 	tests := []struct {
-		name string
-
-		mock       func(ctrl *gomock.Controller) ratelimit.Limiter
+		name       string
+		limited    bool
+		limiterErr error
 		reqBuilder func(t *testing.T) *http.Request
-
 		// 预期响应
 		wantCode int
 	}{
 		{
 			// 不限流
-			name: "no_limit",
-			mock: func(ctrl *gomock.Controller) ratelimit.Limiter {
-				limiter := limitmocks.NewMockLimiter(ctrl)
-				limiter.EXPECT().Limit(gomock.Any(), gomock.Any()).
-					Return(false, nil)
-				return limiter
-			},
+			name:       "no_limit",
+			limited:    false,
+			limiterErr: nil,
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, limitURL, nil)
 				if err != nil {
@@ -100,13 +93,9 @@ func TestBuilder_Build(t *testing.T) {
 		},
 		{
 			// 限流
-			name: "limited",
-			mock: func(ctrl *gomock.Controller) ratelimit.Limiter {
-				limiter := limitmocks.NewMockLimiter(ctrl)
-				limiter.EXPECT().Limit(gomock.Any(), gomock.Any()).
-					Return(true, nil)
-				return limiter
-			},
+			name:       "limited",
+			limited:    true,
+			limiterErr: nil,
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, limitURL, nil)
 				if err != nil {
@@ -118,13 +107,9 @@ func TestBuilder_Build(t *testing.T) {
 		},
 		{
 			// 系统错误
-			name: "system_error",
-			mock: func(ctrl *gomock.Controller) ratelimit.Limiter {
-				limiter := limitmocks.NewMockLimiter(ctrl)
-				limiter.EXPECT().Limit(gomock.Any(), gomock.Any()).
-					Return(false, errors.New("模拟系统错误"))
-				return limiter
-			},
+			name:       "system_error",
+			limited:    false,
+			limiterErr: errors.New("模拟系统错误"),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, limitURL, nil)
 				if err != nil {
@@ -137,10 +122,8 @@ func TestBuilder_Build(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-			svc := NewBuilder(tt.mock(ctrl))
-
+			testLimiter.limited = tt.limited
+			testLimiter.err = tt.limiterErr
 			server := gin.Default()
 			server.Use(svc.Build())
 			svc.RegisterRoutes(server)
@@ -156,24 +139,18 @@ func TestBuilder_Build(t *testing.T) {
 }
 
 func TestBuilder_limit(t *testing.T) {
+	testLimiter := &testLimiter{}
 	tests := []struct {
-		name string
-
-		mock       func(ctrl *gomock.Controller) ratelimit.Limiter
+		name       string
+		limited    bool
+		limiterErr error
 		reqBuilder func(t *testing.T) *http.Request
-
 		// 预期响应
 		want    bool
 		wantErr error
 	}{
 		{
 			name: "不限流",
-			mock: func(ctrl *gomock.Controller) ratelimit.Limiter {
-				limiter := limitmocks.NewMockLimiter(ctrl)
-				limiter.EXPECT().Limit(gomock.Any(), gomock.Any()).
-					Return(false, nil)
-				return limiter
-			},
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "", nil)
 				if err != nil {
@@ -185,13 +162,9 @@ func TestBuilder_limit(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "限流",
-			mock: func(ctrl *gomock.Controller) ratelimit.Limiter {
-				limiter := limitmocks.NewMockLimiter(ctrl)
-				limiter.EXPECT().Limit(gomock.Any(), gomock.Any()).
-					Return(true, nil)
-				return limiter
-			},
+			name:       "限流",
+			limited:    true,
+			limiterErr: nil,
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "", nil)
 				if err != nil {
@@ -203,13 +176,9 @@ func TestBuilder_limit(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "限流代码出错",
-			mock: func(ctrl *gomock.Controller) ratelimit.Limiter {
-				limiter := limitmocks.NewMockLimiter(ctrl)
-				limiter.EXPECT().Limit(gomock.Any(), gomock.Any()).
-					Return(false, errors.New("模拟系统错误"))
-				return limiter
-			},
+			name:       "限流代码出错",
+			limited:    false,
+			limiterErr: errors.New("模拟系统错误"),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "", nil)
 				if err != nil {
@@ -224,10 +193,9 @@ func TestBuilder_limit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-			limiter := tt.mock(ctrl)
-			b := NewBuilder(limiter)
+			testLimiter.limited = tt.limited
+			testLimiter.err = tt.limiterErr
+			b := NewBuilder(testLimiter)
 
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
@@ -262,9 +230,18 @@ func TestBuilder_SetLogFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := NewBuilder(NewRedisSlidingWindowLimiter(nil, time.Second, 100))
+			b := NewBuilder(&testLimiter{})
 			b.SetLogFunc(tt.fn).Build()
 			assert.Equal(t, tt.want, &b.logFn)
 		})
 	}
+}
+
+type testLimiter struct {
+	limited bool
+	err     error
+}
+
+func (t *testLimiter) Limit(_ context.Context, _ string) (bool, error) {
+	return t.limited, t.err
 }
