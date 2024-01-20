@@ -135,6 +135,8 @@ func main() {
 
 ratelimit 是基于 `redis` 实现的滑动窗口限流器。它为 gin 提供了限流中间件，使您快速完成针对 IP 的限流，您也可以设置不同的 key 来实现不同的限流。
 
+在 [limiter](https://github.com/udugong/limiter) 仓库中提供了 `Limiter` 接口的实现。
+
 ```go
 package main
 
@@ -144,14 +146,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	ratelimiter "github.com/udugong/limiter/ratelimit"
 
 	"github.com/udugong/ginx/middlewares/ratelimit"
 )
 
 func main() {
 	rdb := InitRedis()
-	// 创建一个基于 redis, 1000/s 的限流器
-	limiter := ratelimit.NewRedisSlidingWindowLimiter(rdb, time.Second, 1000)
+	// github.com/udugong/limiter 中提供了一些 Limiter 接口的实现
+	// 这里使用 ratelimit 创建一个基于 redis, 1000/s 的限流器
+	limiter := ratelimiter.NewRedisSlidingWindowLimiter(rdb, time.Second, 1000)
 	builder := ratelimit.NewBuilder(limiter)
 
 	r := gin.Default()
