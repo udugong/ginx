@@ -200,7 +200,7 @@ func TestMiddlewareBuilder_SetExtractTokenFunc(t *testing.T) {
 }
 
 func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
-	type clmKey struct{}
+	clmKey := "claims"
 	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
 		name    string
 		fn      func(*gin.Context, T)
@@ -221,17 +221,15 @@ func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
 				Uid: 123,
 			},
 			after: func(t *testing.T, c *gin.Context) {
-				tmp, _ := c.Get(claimsKey)
-				clm, ok := tmp.(Claims)
-				require.Equal(t, true, ok)
+				clm, ok := ClaimsFromContext[Claims](c.Request.Context())
+				assert.True(t, ok)
 				assert.Equal(t, int64(123), clm.Uid)
 			},
 		},
 		{
 			name: "another",
 			fn: func(c *gin.Context, claims Claims) {
-				ctx := context.WithValue(c.Request.Context(), clmKey{}, claims)
-				c.Request = c.Request.WithContext(ctx)
+				c.Set(clmKey, claims)
 			},
 			isUseFn: true,
 			req: func(t *testing.T) *http.Request {
@@ -243,7 +241,7 @@ func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
 				Uid: 456,
 			},
 			after: func(t *testing.T, c *gin.Context) {
-				tmp := c.Request.Context().Value(clmKey{})
+				tmp, _ := c.Get(clmKey)
 				clm, ok := tmp.(Claims)
 				require.Equal(t, true, ok)
 				assert.Equal(t, int64(456), clm.Uid)
@@ -296,7 +294,7 @@ func TestMiddlewareBuilder_IgnoreFullPath(t *testing.T) {
 			name:      "incorrect_full_path",
 			fullPaths: []string{"/login", "/user/:id"},
 			reqBuilder: func(t *testing.T) *http.Request {
-				req, err := http.NewRequest(http.MethodGet, "/user/1/detial", nil)
+				req, err := http.NewRequest(http.MethodGet, "/user/1/detail", nil)
 				require.NoError(t, err)
 				return req
 			},
@@ -315,6 +313,58 @@ func TestMiddlewareBuilder_IgnoreFullPath(t *testing.T) {
 
 			server.ServeHTTP(recorder, req)
 			assert.Equal(t, tt.wantCode, recorder.Code)
+		})
+	}
+}
+
+func TestContextWithClaims(t *testing.T) {
+	type testCase[T jwt.Claims] struct {
+		name   string
+		ctx    context.Context
+		claims T
+		want   context.Context
+	}
+	tests := []testCase[Claims]{
+		{
+			name:   "normal",
+			ctx:    context.Background(),
+			claims: Claims{Uid: 1},
+			want:   context.WithValue(context.Background(), claimsKey{}, Claims{Uid: 1}),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ContextWithClaims(tt.ctx, tt.claims))
+		})
+	}
+}
+
+func TestClaimsFromContext(t *testing.T) {
+	type testCase[T jwt.Claims] struct {
+		name  string
+		ctx   context.Context
+		want  T
+		want1 bool
+	}
+	tests := []testCase[Claims]{
+		{
+			name:  "normal",
+			ctx:   context.WithValue(context.Background(), claimsKey{}, Claims{Uid: 1}),
+			want:  Claims{Uid: 1},
+			want1: true,
+		},
+		{
+			name:  "claims_not_found",
+			ctx:   context.Background(),
+			want:  Claims{},
+			want1: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, got1 := ClaimsFromContext[Claims](tt.ctx)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want1, got1)
 		})
 	}
 }
