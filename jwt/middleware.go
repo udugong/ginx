@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -13,8 +14,6 @@ import (
 const (
 	authorizationHeader = "authorization"
 	bearerPrefix        = "Bearer"
-	// claimsKey 定义了存储 Claims 在 gin.Context 中的 key.
-	claimsKey = "claims"
 )
 
 // MiddlewareBuilder 定义认证的中间件构建器.
@@ -28,8 +27,10 @@ type MiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]] struct {
 	extractToken func(*gin.Context) string
 
 	// Middleware 中设置 Claims 的方法.
-	// 默认设置到 key="claims" 的 gin.Context 中.
+	// 默认设置到 key=claimsKey{} 的 context.Context 中.
+	// 通过 ClaimsFromContext[T]() 获取 Claims.
 	setClaims func(*gin.Context, T)
+
 	jwtcore.TokenManager[T, PT]
 }
 
@@ -42,7 +43,8 @@ func NewMiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]](
 		},
 		extractToken: extractToken,
 		setClaims: func(c *gin.Context, t T) {
-			c.Set(claimsKey, t)
+			c.Request = c.Request.WithContext(
+				ContextWithClaims(c.Request.Context(), t))
 		},
 		TokenManager: m,
 	}
@@ -99,6 +101,26 @@ func (m *MiddlewareBuilder[T, PT]) Build() gin.HandlerFunc {
 	}
 }
 
+// claimsKey 定义从 context.Context 中设置/获取 jwtcore.Claims 的 key.
+type claimsKey struct{}
+
+// ContextWithClaims 为 claims 创建 context.
+func ContextWithClaims[T jwt.Claims](ctx context.Context, claims T) context.Context {
+	return context.WithValue(ctx, claimsKey{}, claims)
+}
+
+// ClaimsFromContext 从 context 中获取 claims.
+// 如果没有正确的 claims 则返回 false.
+func ClaimsFromContext[T jwt.Claims](ctx context.Context) (T, bool) {
+	var zeroClm T
+	v := ctx.Value(claimsKey{})
+	clm, ok := v.(T)
+	if !ok {
+		return zeroClm, false
+	}
+	return clm, true
+}
+
 // ignoreFullPaths 设置忽略完整路径.
 //
 //	router.GET("/user/:id", func(c *gin.Context) {
@@ -122,6 +144,7 @@ func extractToken(ctx *gin.Context) string {
 		return ""
 	}
 	var b strings.Builder
+	b.Grow(len(bearerPrefix) + 1)
 	b.WriteString(bearerPrefix)
 	b.WriteString(" ")
 	prefix := b.String()

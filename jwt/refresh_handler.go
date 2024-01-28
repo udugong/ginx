@@ -58,9 +58,7 @@ func NewRefreshManager[T jwt.Claims, PT jwtcore.Claims[T]](
 	}
 	m.refreshAuthHandler = NewMiddlewareBuilder[T, PT](refreshTM).Build()
 	m.getClaims = func(c *gin.Context) (T, bool) {
-		v, ok := c.Get(claimsKey)
-		clm, ok := v.(T)
-		return clm, ok
+		return ClaimsFromContext[T](c.Request.Context())
 	}
 	m.accessTokenSetterFn = func(c *gin.Context, token string) {
 		c.Header("x-access-token", token)
