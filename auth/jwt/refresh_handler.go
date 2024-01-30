@@ -6,17 +6,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/udugong/ginx/jwt/jwtcore"
+	"github.com/udugong/token"
+	"github.com/udugong/token/jwtcore"
 )
 
 // RefreshManager 定义刷新令牌管理器.
 type RefreshManager[T jwt.Claims, PT jwtcore.Claims[T]] struct {
 	// accessTM 资源令牌管理.
-	accessTM jwtcore.TokenManager[T, PT]
+	accessTM token.Manager[T]
 
 	// refreshTM 刷新令牌管理.
-	refreshTM jwtcore.TokenManager[T, PT]
+	refreshTM token.Manager[T]
 
 	// rotateRefreshToken 是否轮换刷新令牌.
 	// 默认为 false.
@@ -49,14 +49,14 @@ type TokenSetterFunc func(c *gin.Context, token string)
 
 // NewRefreshManager 创建一个刷新令牌管理器.
 func NewRefreshManager[T jwt.Claims, PT jwtcore.Claims[T]](
-	accessTM jwtcore.TokenManager[T, PT], refreshTM jwtcore.TokenManager[T, PT],
+	accessTM token.Manager[T], refreshTM token.Manager[T],
 	options ...Option[T, PT]) *RefreshManager[T, PT] {
 	m := &RefreshManager[T, PT]{
 		accessTM:           accessTM,
 		refreshTM:          refreshTM,
 		rotateRefreshToken: false,
 	}
-	m.refreshAuthHandler = NewMiddlewareBuilder[T, PT](refreshTM).Build()
+	m.refreshAuthHandler = NewMiddlewareBuilder[T](refreshTM).Build()
 	m.getClaims = func(c *gin.Context) (T, bool) {
 		return ClaimsFromContext[T](c.Request.Context())
 	}

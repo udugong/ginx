@@ -11,8 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/udugong/ginx/jwt/jwtcore"
+	"github.com/udugong/token/jwtcore"
 )
 
 type Claims struct {
@@ -21,13 +20,13 @@ type Claims struct {
 }
 
 func TestMiddlewareBuilder_Build(t *testing.T) {
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	type testCase[T jwt.Claims] struct {
 		name            string
 		reqBuilder      func(t *testing.T) *http.Request
 		isUseMiddleware bool
 		wantCode        int
 	}
-	tests := []testCase[Claims, *Claims]{
+	tests := []testCase[Claims]{
 		{
 			// 未使用中间件
 			name: "no_middleware_used",
@@ -89,7 +88,7 @@ func TestMiddlewareBuilder_Build(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMiddlewareBuilder[Claims, *Claims](tokenManager)
+			m := NewMiddlewareBuilder[Claims](tokenManager)
 			server := gin.Default()
 			if tt.isUseMiddleware {
 				server.Use(m.Build())
@@ -106,14 +105,14 @@ func TestMiddlewareBuilder_Build(t *testing.T) {
 }
 
 func TestMiddlewareBuilder_IgnorePathFunc(t *testing.T) {
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	type testCase[T jwt.Claims] struct {
 		name    string
 		fn      func(*gin.Context) bool
 		isUseFn bool
 		req     func(t *testing.T) *http.Request
 		want    bool
 	}
-	tests := []testCase[Claims, *Claims]{
+	tests := []testCase[Claims]{
 		{
 			name: "normal",
 			req: func(t *testing.T) *http.Request {
@@ -139,7 +138,7 @@ func TestMiddlewareBuilder_IgnorePathFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMiddlewareBuilder[Claims, *Claims](tokenManager)
+			m := NewMiddlewareBuilder[Claims](tokenManager)
 			if tt.isUseFn {
 				m.IgnorePathFunc(tt.fn)
 			}
@@ -152,14 +151,14 @@ func TestMiddlewareBuilder_IgnorePathFunc(t *testing.T) {
 }
 
 func TestMiddlewareBuilder_SetExtractTokenFunc(t *testing.T) {
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	type testCase[T jwt.Claims] struct {
 		name    string
 		fn      func(*gin.Context) string
 		isUseFn bool
 		req     func(t *testing.T) *http.Request
 		want    string
 	}
-	tests := []testCase[Claims, *Claims]{
+	tests := []testCase[Claims]{
 		{
 			name: "normal",
 			req: func(t *testing.T) *http.Request {
@@ -187,7 +186,7 @@ func TestMiddlewareBuilder_SetExtractTokenFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMiddlewareBuilder[Claims, *Claims](tokenManager)
+			m := NewMiddlewareBuilder[Claims](tokenManager)
 			if tt.isUseFn {
 				m.SetExtractTokenFunc(tt.fn)
 			}
@@ -201,7 +200,7 @@ func TestMiddlewareBuilder_SetExtractTokenFunc(t *testing.T) {
 
 func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
 	clmKey := "claims"
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	type testCase[T jwt.Claims] struct {
 		name    string
 		fn      func(*gin.Context, T)
 		isUseFn bool
@@ -209,7 +208,7 @@ func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
 		clm     T
 		after   func(t *testing.T, c *gin.Context)
 	}
-	tests := []testCase[Claims, *Claims]{
+	tests := []testCase[Claims]{
 		{
 			name: "normal",
 			req: func(t *testing.T) *http.Request {
@@ -250,7 +249,7 @@ func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMiddlewareBuilder[Claims, *Claims](tokenManager)
+			m := NewMiddlewareBuilder[Claims](tokenManager)
 			if tt.isUseFn {
 				m.SetClaimsFunc(tt.fn)
 			}
@@ -263,13 +262,13 @@ func TestMiddlewareBuilder_SetClaimsFunc(t *testing.T) {
 }
 
 func TestMiddlewareBuilder_IgnoreFullPath(t *testing.T) {
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	type testCase[T jwt.Claims] struct {
 		name       string
 		fullPaths  []string
 		reqBuilder func(t *testing.T) *http.Request
 		wantCode   int
 	}
-	tests := []testCase[Claims, *Claims]{
+	tests := []testCase[Claims]{
 		{
 			name:      "normal",
 			fullPaths: []string{"/login", "/user/:id"},
@@ -303,7 +302,7 @@ func TestMiddlewareBuilder_IgnoreFullPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewMiddlewareBuilder[Claims, *Claims](tokenManager)
+			m := NewMiddlewareBuilder[Claims](tokenManager)
 			server := gin.Default()
 			server.Use(m.IgnoreFullPath(tt.fullPaths...).Build())
 			m.registerRoutes(server)
@@ -370,14 +369,14 @@ func TestClaimsFromContext(t *testing.T) {
 }
 
 var (
-	tokenManager = jwtcore.NewTokenManagerServer[Claims, *Claims](
+	tokenManager = jwtcore.NewTokenManager[Claims, *Claims](
 		"sign key", 10*time.Minute,
-		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
+		jwtcore.WithAddParserOption[Claims](jwt.WithTimeFunc(func() time.Time {
 			return time.UnixMilli(1695571200000)
-		}))
+		})))
 )
 
-func (m *MiddlewareBuilder[T, PT]) registerRoutes(server *gin.Engine) {
+func (m *MiddlewareBuilder[T]) registerRoutes(server *gin.Engine) {
 	server.GET("/", func(ctx *gin.Context) {
 		ctx.Status(http.StatusOK)
 	})

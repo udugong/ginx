@@ -7,8 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/udugong/ginx/jwt/jwtcore"
+	"github.com/udugong/token"
 )
 
 const (
@@ -17,7 +16,7 @@ const (
 )
 
 // MiddlewareBuilder 定义认证的中间件构建器.
-type MiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+type MiddlewareBuilder[T jwt.Claims] struct {
 	// Middleware 中忽略认证路径的方法.
 	// 默认使用 func(*gin.Context) bool { return false } 也就是全部不忽略.
 	ignorePath func(*gin.Context) bool
@@ -31,13 +30,13 @@ type MiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]] struct {
 	// 通过 ClaimsFromContext[T]() 获取 Claims.
 	setClaims func(*gin.Context, T)
 
-	jwtcore.TokenManager[T, PT]
+	TokenManager token.Manager[T]
 }
 
 // NewMiddlewareBuilder 创建一个认证的中间件构建器.
-func NewMiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]](
-	m jwtcore.TokenManager[T, PT]) *MiddlewareBuilder[T, PT] {
-	return &MiddlewareBuilder[T, PT]{
+func NewMiddlewareBuilder[T jwt.Claims](
+	m token.Manager[T]) *MiddlewareBuilder[T] {
+	return &MiddlewareBuilder[T]{
 		ignorePath: func(*gin.Context) bool {
 			return false
 		},
@@ -51,31 +50,31 @@ func NewMiddlewareBuilder[T jwt.Claims, PT jwtcore.Claims[T]](
 }
 
 // IgnorePathFunc 设置忽略认证路径.
-func (m *MiddlewareBuilder[T, PT]) IgnorePathFunc(fn func(*gin.Context) bool) *MiddlewareBuilder[T, PT] {
+func (m *MiddlewareBuilder[T]) IgnorePathFunc(fn func(*gin.Context) bool) *MiddlewareBuilder[T] {
 	m.ignorePath = fn
 	return m
 }
 
 // SetExtractTokenFunc 设置提取 token 字符串的方法.
-func (m *MiddlewareBuilder[T, PT]) SetExtractTokenFunc(fn func(*gin.Context) string) *MiddlewareBuilder[T, PT] {
+func (m *MiddlewareBuilder[T]) SetExtractTokenFunc(fn func(*gin.Context) string) *MiddlewareBuilder[T] {
 	m.extractToken = fn
 	return m
 }
 
 // SetClaimsFunc 设置 Claims 的方法.
-func (m *MiddlewareBuilder[T, PT]) SetClaimsFunc(fn func(*gin.Context, T)) *MiddlewareBuilder[T, PT] {
+func (m *MiddlewareBuilder[T]) SetClaimsFunc(fn func(*gin.Context, T)) *MiddlewareBuilder[T] {
 	m.setClaims = fn
 	return m
 }
 
 // IgnoreFullPath 忽略匹配的完整路径.
 // 例如: "/user/:id"
-func (m *MiddlewareBuilder[T, PT]) IgnoreFullPath(fullPaths ...string) *MiddlewareBuilder[T, PT] {
+func (m *MiddlewareBuilder[T]) IgnoreFullPath(fullPaths ...string) *MiddlewareBuilder[T] {
 	return m.IgnorePathFunc(ignoreFullPaths(fullPaths...))
 }
 
 // Build 构建认证中间件.
-func (m *MiddlewareBuilder[T, PT]) Build() gin.HandlerFunc {
+func (m *MiddlewareBuilder[T]) Build() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 不需要校验
 		if m.ignorePath(c) {
@@ -101,7 +100,7 @@ func (m *MiddlewareBuilder[T, PT]) Build() gin.HandlerFunc {
 	}
 }
 
-// claimsKey 定义从 context.Context 中设置/获取 jwtcore.Claims 的 key.
+// claimsKey 定义从 context.Context 中设置/获取 claims 的 key.
 type claimsKey struct{}
 
 // ContextWithClaims 为 claims 创建 context.

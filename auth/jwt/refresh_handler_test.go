@@ -13,8 +13,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/udugong/ginx/jwt/jwtcore"
+	"github.com/udugong/token/jwtcore"
 )
 
 func TestRefreshManager_Handler(t *testing.T) {
@@ -22,16 +21,24 @@ func TestRefreshManager_Handler(t *testing.T) {
 	refreshKey := "refresh key"
 	defaultExpire := 10 * time.Minute
 	nowTime := time.UnixMilli(1695571200000)
-	accessTM := jwtcore.NewTokenManagerServer[Claims, *Claims](
+	accessTM := jwtcore.NewTokenManager[Claims, *Claims](
 		accessKey, defaultExpire,
 		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
 			return nowTime
-		}))
-	refreshTM := jwtcore.NewTokenManagerServer[Claims, *Claims](
+		}),
+		jwtcore.WithAddParserOption[Claims, *Claims](jwt.WithTimeFunc(
+			func() time.Time { return nowTime },
+		)),
+	)
+	refreshTM := jwtcore.NewTokenManager[Claims, *Claims](
 		refreshKey, 24*time.Hour,
 		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
 			return nowTime
-		}))
+		}),
+		jwtcore.WithAddParserOption[Claims, *Claims](jwt.WithTimeFunc(
+			func() time.Time { return nowTime },
+		)),
+	)
 
 	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
 		name       string
@@ -146,7 +153,7 @@ func TestRefreshManager_Handler(t *testing.T) {
 			name: "change_option",
 			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
 				WithRefreshAuthHandler[Claims, *Claims](
-					NewMiddlewareBuilder[Claims, *Claims](refreshTM).SetClaimsFunc(
+					NewMiddlewareBuilder[Claims](refreshTM).SetClaimsFunc(
 						func(c *gin.Context, claims Claims) {
 							ctx := context.WithValue(c.Request.Context(), "claims", claims)
 							c.Request = c.Request.WithContext(ctx)
@@ -235,6 +242,6 @@ func (m *testTokenManager) GenerateToken(_ Claims) (string, error) {
 	return m.generateToken, m.generateErr
 }
 
-func (m *testTokenManager) VerifyToken(_ string, _ ...jwt.ParserOption) (Claims, error) {
+func (m *testTokenManager) VerifyToken(_ string) (Claims, error) {
 	return m.verifyClaims, m.verifyErr
 }
