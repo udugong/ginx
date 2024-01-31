@@ -1,48 +1,159 @@
-# Ginx
+# ginx
+
 gin的插件
 
 
 
-Go Versions
+go versions
 ==================
 
 `>=1.20`
 
+# usage
 
+下载安装：`go get github.com/udugong/ginx@latest`
 
-# Usage
-
-下载安装：`go get github.com/udugong/ginx`
-
-  * [jwt 的使用](#jwt-package)
-  * [ratelimit 限流](#ratelimit-限流)
+* [auth 认证](#auth-package)
+* [ratelimit 限流](#ratelimit-限流)
 
 
 
-# `jwt` package
+# `auth` package
 
-该`jwt`包提供了一些有用的方法，使您可以在使用 gin 时快速完成认证功能。
+该`auth`包提供了一些有用的方法，使您可以在使用 gin
+时快速完成认证功能。
+
+- [jwt 认证](#auth/jwt)
+
+## auth/jwt
+
+该`jwt`包提供了 jwt 认证功能。该功能借助了 [token/jwtcore](https://github.com/udugong/token) 包的 jwt 生成/校验功能实现。
 
 - 利用泛型可以自定义 claims 内容
-- 生成/校验 token（在 `jwtcore` 包中）
 - 登录认证中间件
 - 刷新 token 的 gin.HandlerFunc
+
+#### 使用方法
+
+注意:
+
+- 关于请求头CORS的问题可以查看[cors](https://github.com/gin-contrib/cors)中间件解决。
+- 使用该中间件以及刷新函数，默认会从 `Authorization` 请求头中获取 `Bearer xxxx` 来进行校验。需要在  `cors.Config.AllowHeaders` 中添加 `authorization` 。
+- `RefreshManager`中的 Handler 默认把令牌都放到 `X-Access-Token` 和 `X-Refresh-Token` 请求头中。需要在 `cors.Config.ExposeHeaders` 中添加这两个请求头，前端才能正常获取。
+
+1. 定义 Claims 结构体
+
+   需要嵌入 [jwtcore.RegisteredClaims](https://github.com/udugong/token/blob/main/jwtcore/registered_claims.go#L14) 或者实现 [jwtcore.Claims[T jwt.Claims]](https://github.com/udugong/token/blob/main/jwtcore/claims.go#L11) 接口，其余成员可以自行定义。
+   
+   ```go
+   import "github.com/udugong/token/jwtcore"
+
+   type Claims struct {
+   	Uid int64 `json:"uid"` // 用户ID
+   	// Nickname string `json:"nickname"` // 昵称
+   	// 嵌入
+   	jwtcore.RegisteredClaims
+   }
+   ```
+   
+2. 创建令牌管理器
+
+   通过 jwtcore 创建一个令牌管理器。详细参考 [token/jwtcore](https://github.com/udugong/token) 。
+
+   ```go
+   // 创建资源令牌管理器
+   accessKey := "access key"
+   accessTM := jwtcore.NewTokenManager[Claims](accessKey, 10*time.Minute)
+   ```
+   
+3. 创建认证中间件
+
+   需要传入一个令牌管理器，使用 `Build()` 创建 `gin` 的中间件。您可以灵活的构建。
+
+   ```go
+   import (
+   	"github.com/gin-gonic/gin"
+   	ujwt "github.com/udugong/ginx/auth/jwt"
+   	"github.com/udugong/token/jwtcore"
+   )
+   
+   // 创建认证中间件构建器
+   builder := ujwt.NewMiddlewareBuilder[Claims](accessTM)
+   gin.Default().Use(builder.Build()) // 使用中间件
+   ```
+
+   您可以使用`jwt`包提供的方法灵活构建。
+
+   ```go
+   // 忽略 "/login", "/signup" 这两个 full path 的认证。
+   builder.IgnoreFullPath("/login", "/signup").Build()
+   ```
+
+4. 使用刷新令牌的 gin.HandlerFunc
+
+   需要创建一个刷新令牌的管理器。创建刷新令牌函数的构建器时需要注意：插入 Claims 的具体类型。
+
+   ```go
+   // 使用刷新令牌处理函数
+   refreshKey := "refresh key"
+   // 创建刷新令牌的管理服务
+   refreshTM := jwtcore.NewTokenManager[Claims](refreshKey, 24*time.Hour)
+   // 创建刷新令牌函数的构建器
+   refreshManager := ujwt.NewRefreshManager[Claims](accessTM, refreshTM)
+   
+   // 内部已经开启了 refresh 令牌的认证,因此可以直接使用 refreshManager.Handler 与 relativePath 绑定
+   gin.Default().POST("/refresh-token", refreshManager.Handler)
+   ```
+   
+   您可以使用`jwt`包提供的方法灵活构建。以下提供一些示例：
+   
+   - 轮换 refresh token
+   
+     每次调用刷新令牌函数会重新生成新的 `refresh token` 。默认不开启轮换刷新令牌。如需要轮换 refresh token 则需要把 `WithRotateRefreshToken(true)` 传入以构建刷新令牌管理器。
+   
+     ```go
+     ujwt.NewRefreshManager[Claims](accessTM, refreshTM, ujwt.WithRotateRefreshToken[Claims](true))
+     ```
+   
+   - 修改响应
+   
+     允许自定义刷新令牌函数的响应。传入 `WithResponseSetter` 可以更改响应中。最佳的方式应该是配合 `WithAccessTokenSetter` 和 `WithRefreshTokenSetter` 一同与 `WithResponseSetter` 操作。
+   
+     ```go
+     ujwt.NewRefreshManager[Claims](accessTM, refreshTM,
+     	ujwt.WithRotateRefreshToken[Claims](true), // 允许轮换 refresh token
+     	// 修改响应把 token 放入 Body 中
+     	ujwt.WithResponseSetter[Claims](func(c *gin.Context) {
+     		accessToken := c.Writer.Header().Get("x-access-token")
+     		refreshToken := c.Writer.Header().Get("x-refresh-token")
+     		c.Writer.Header().Del("x-access-token")
+     		c.Writer.Header().Del("x-refresh-token")
+     		c.JSON(http.StatusOK, gin.H{
+     			"access-token":  accessToken,
+     			"refresh-token": refreshToken,
+     		})
+     	}),
+     )
+     ```
+
+#### 示例
 
 ```go
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-
-	ujwt "github.com/udugong/ginx/jwt"
-	"github.com/udugong/ginx/jwt/jwtcore"
+	ujwt "github.com/udugong/ginx/auth/jwt"
+	"github.com/udugong/token/jwtcore"
 )
 
 type Claims struct {
-	Uid int64 `json:"uid"`
+	Uid int64 `json:"uid"` // 用户ID
+	// Nickname string `json:"nickname"` // 昵称
 	// 嵌入
 	jwtcore.RegisteredClaims
 }
@@ -51,10 +162,10 @@ func main() {
 	r := gin.Default()
 
 	accessKey := "access key"
-	// 创建资源令牌管理服务
-	accessTM := jwtcore.NewTokenManagerServer[Claims, *Claims](accessKey, 10*time.Minute)
+	// 创建资源令牌管理器
+	accessTM := jwtcore.NewTokenManager[Claims](accessKey, 10*time.Minute)
 	// 创建认证中间件构建器
-	builder := ujwt.NewMiddlewareBuilder[Claims, *Claims](accessTM)
+	builder := ujwt.NewMiddlewareBuilder[Claims](accessTM)
 
 	// // 构建全局登录认证中间件
 	// gloAuthMiddleware := builder.
@@ -66,8 +177,7 @@ func main() {
 	// 单独拦截
 	r.GET("/profile", builder.Build(), func(c *gin.Context) {
 		// 获取 claims
-		v, _ := c.Get("claims") // 默认存放在 key = "claims" 的 gin.Context 中.
-		clm, ok := v.(Claims)
+		clm, ok := ujwt.ClaimsFromContext[Claims](c.Request.Context())
 		if !ok {
 			c.JSON(http.StatusInternalServerError, "不应该命中该分支")
 			return
@@ -91,10 +201,12 @@ func main() {
 
 	// 使用刷新令牌处理函数
 	refreshKey := "refresh key"
-	// 创建刷新令牌的管理服务
-	refreshTM := jwtcore.NewTokenManagerServer[Claims, *Claims](refreshKey, 24*time.Hour)
+	// 创建刷新令牌的管理器
+	refreshTM := jwtcore.NewTokenManager[Claims](refreshKey, 24*time.Hour)
 	// 创建刷新令牌函数的构建器
-	refreshManager := ujwt.NewRefreshManager[Claims, *Claims](accessTM, refreshTM)
+	refreshManager := ujwt.NewRefreshManager[Claims](accessTM, refreshTM,
+		ujwt.WithRotateRefreshToken[Claims](true), // 允许轮换 refresh token
+	)
 
 	// 登录
 	r.POST("/login-v1", func(c *gin.Context) {
@@ -115,7 +227,6 @@ func main() {
 		c.Status(http.StatusNoContent)
 	})
 
-	// 刷新令牌的函数
 	// 内部已经开启了 refresh 令牌的认证,因此可以直接使用 refreshManager.Handler 与 relativePath 绑定
 	r.POST("/refresh-token", refreshManager.Handler)
 
@@ -124,16 +235,12 @@ func main() {
 
 ```
 
-注意:
-- 关于请求头CORS的问题可以查看[cors](https://github.com/gin-contrib/cors)中间件解决。
-- 用户认证中间件默认是根据`Authorization`请求头内容来进行校验。需要在`cors.Config`中配置`AllowHeaders`。
-- `RefreshManager`中的 Handler 默认把令牌都放到`x-access-token`和`x-refresh-token`请求头中。需要在`cors.Config`中配置`ExposeHeaders`前端才能正常获取。
-
 
 
 # `ratelimit` 限流
 
-ratelimit 是基于 `redis` 实现的滑动窗口限流器。它为 gin 提供了限流中间件，使您快速完成针对 IP 的限流，您也可以设置不同的 key 来实现不同的限流。
+ratelimit 是基于 `redis` 实现的滑动窗口限流器。它为 gin 提供了限流中间件，使您快速完成针对 IP 的限流，您也可以设置不同的
+key 来实现不同的限流。
 
 在 [limiter](https://github.com/udugong/limiter) 仓库中提供了 `Limiter` 接口的实现。
 
@@ -159,14 +266,14 @@ func main() {
 	builder := ratelimit.NewBuilder(limiter)
 
 	r := gin.Default()
+	// 默认是根据 IP 限流
+	// 每个 IP 每秒 最多访问 1000次
+	// r.Use(builder.Build())
+
 	// 控制所有的请求的速率
 	r.Use(builder.SetKeyGenFunc(func(*gin.Context) string {
 		return "all-request" // 设置 redis 的 key
 	}).Build())
-
-	// 默认是根据 IP 限流
-	// 每个 IP 每秒 最多访问 1000次
-	r.Use(builder.Build())
 }
 
 func InitRedis() redis.Cmdable {
@@ -185,4 +292,3 @@ func InitRedis() redis.Cmdable {
 }
 
 ```
-
