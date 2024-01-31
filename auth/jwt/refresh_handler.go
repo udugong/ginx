@@ -7,11 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/udugong/token"
-	"github.com/udugong/token/jwtcore"
 )
 
 // RefreshManager 定义刷新令牌管理器.
-type RefreshManager[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+type RefreshManager[T jwt.Claims] struct {
 	// accessTM 资源令牌管理.
 	accessTM token.Manager[T]
 
@@ -48,10 +47,10 @@ type RefreshManager[T jwt.Claims, PT jwtcore.Claims[T]] struct {
 type TokenSetterFunc func(c *gin.Context, token string)
 
 // NewRefreshManager 创建一个刷新令牌管理器.
-func NewRefreshManager[T jwt.Claims, PT jwtcore.Claims[T]](
+func NewRefreshManager[T jwt.Claims](
 	accessTM token.Manager[T], refreshTM token.Manager[T],
-	options ...Option[T, PT]) *RefreshManager[T, PT] {
-	m := &RefreshManager[T, PT]{
+	options ...Option[T]) *RefreshManager[T] {
+	m := &RefreshManager[T]{
 		accessTM:           accessTM,
 		refreshTM:          refreshTM,
 		rotateRefreshToken: false,
@@ -72,54 +71,62 @@ func NewRefreshManager[T jwt.Claims, PT jwtcore.Claims[T]](
 	return m.WithOptions(options...)
 }
 
-type Option[T jwt.Claims, PT jwtcore.Claims[T]] interface {
-	apply(*RefreshManager[T, PT])
+type Option[T jwt.Claims] interface {
+	apply(*RefreshManager[T])
 }
 
-type optionFunc[T jwt.Claims, PT jwtcore.Claims[T]] func(*RefreshManager[T, PT])
+type optionFunc[T jwt.Claims] func(*RefreshManager[T])
 
-func (f optionFunc[T, PT]) apply(m *RefreshManager[T, PT]) {
+func (f optionFunc[T]) apply(m *RefreshManager[T]) {
 	f(m)
 }
 
-func WithRotateRefreshToken[T jwt.Claims, PT jwtcore.Claims[T]](isRotate bool) Option[T, PT] {
-	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+// WithRotateRefreshToken 是否轮换 refresh token.
+func WithRotateRefreshToken[T jwt.Claims](isRotate bool) Option[T] {
+	return optionFunc[T](func(m *RefreshManager[T]) {
 		m.rotateRefreshToken = isRotate
 	})
 }
 
-func WithRefreshAuthHandler[T jwt.Claims, PT jwtcore.Claims[T]](fn gin.HandlerFunc) Option[T, PT] {
-	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+// WithRefreshAuthHandler 更改刷新令牌函数的验证 gin.HandlerFunc.
+// 请小心使用该方法.
+func WithRefreshAuthHandler[T jwt.Claims](fn gin.HandlerFunc) Option[T] {
+	return optionFunc[T](func(m *RefreshManager[T]) {
 		m.refreshAuthHandler = fn
 	})
 }
 
-func WithGetClaims[T jwt.Claims, PT jwtcore.Claims[T]](fn func(*gin.Context) (T, bool)) Option[T, PT] {
-	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+// WithGetClaims 更改获取 Claims 方式.
+// 使用该方法需要与 refreshAuthHandler 中设置 Claims 的方式匹配.
+func WithGetClaims[T jwt.Claims](fn func(*gin.Context) (T, bool)) Option[T] {
+	return optionFunc[T](func(m *RefreshManager[T]) {
 		m.getClaims = fn
 	})
 }
 
-func WithAccessTokenSetter[T jwt.Claims, PT jwtcore.Claims[T]](fn TokenSetterFunc) Option[T, PT] {
-	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+// WithAccessTokenSetter 更改设置 access token 的方式.
+func WithAccessTokenSetter[T jwt.Claims](fn TokenSetterFunc) Option[T] {
+	return optionFunc[T](func(m *RefreshManager[T]) {
 		m.accessTokenSetterFn = fn
 	})
 }
 
-func WithRefreshTokenSetter[T jwt.Claims, PT jwtcore.Claims[T]](fn TokenSetterFunc) Option[T, PT] {
-	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+// WithRefreshTokenSetter 更改设置 refresh token 的方式
+func WithRefreshTokenSetter[T jwt.Claims](fn TokenSetterFunc) Option[T] {
+	return optionFunc[T](func(m *RefreshManager[T]) {
 		m.refreshTokenSetterFn = fn
 	})
 }
 
-func WithResponseSetter[T jwt.Claims, PT jwtcore.Claims[T]](fn gin.HandlerFunc) Option[T, PT] {
-	return optionFunc[T, PT](func(m *RefreshManager[T, PT]) {
+// WithResponseSetter 更改刷新令牌函数的响应.
+func WithResponseSetter[T jwt.Claims](fn gin.HandlerFunc) Option[T] {
+	return optionFunc[T](func(m *RefreshManager[T]) {
 		m.responseHandler = fn
 	})
 }
 
 // Handler 刷新令牌的 gin.HandlerFunc.
-func (m *RefreshManager[T, PT]) Handler(c *gin.Context) {
+func (m *RefreshManager[T]) Handler(c *gin.Context) {
 	m.refreshAuthHandler(c)
 	if c.IsAborted() {
 		return
@@ -154,7 +161,7 @@ func (m *RefreshManager[T, PT]) Handler(c *gin.Context) {
 	m.responseHandler(c)
 }
 
-func (m *RefreshManager[T, PT]) WithOptions(opts ...Option[T, PT]) *RefreshManager[T, PT] {
+func (m *RefreshManager[T]) WithOptions(opts ...Option[T]) *RefreshManager[T] {
 	c := m.clone()
 	for _, opt := range opts {
 		opt.apply(c)
@@ -162,7 +169,7 @@ func (m *RefreshManager[T, PT]) WithOptions(opts ...Option[T, PT]) *RefreshManag
 	return c
 }
 
-func (m *RefreshManager[T, PT]) clone() *RefreshManager[T, PT] {
+func (m *RefreshManager[T]) clone() *RefreshManager[T] {
 	copyHandler := *m
 	return &copyHandler
 }

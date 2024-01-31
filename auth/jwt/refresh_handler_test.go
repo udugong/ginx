@@ -21,38 +21,38 @@ func TestRefreshManager_Handler(t *testing.T) {
 	refreshKey := "refresh key"
 	defaultExpire := 10 * time.Minute
 	nowTime := time.UnixMilli(1695571200000)
-	accessTM := jwtcore.NewTokenManager[Claims, *Claims](
+	accessTM := jwtcore.NewTokenManager[Claims](
 		accessKey, defaultExpire,
-		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
+		jwtcore.WithTimeFunc[Claims](func() time.Time {
 			return nowTime
 		}),
-		jwtcore.WithAddParserOption[Claims, *Claims](jwt.WithTimeFunc(
+		jwtcore.WithAddParserOption[Claims](jwt.WithTimeFunc(
 			func() time.Time { return nowTime },
 		)),
 	)
-	refreshTM := jwtcore.NewTokenManager[Claims, *Claims](
+	refreshTM := jwtcore.NewTokenManager[Claims](
 		refreshKey, 24*time.Hour,
-		jwtcore.WithTimeFunc[Claims, *Claims](func() time.Time {
+		jwtcore.WithTimeFunc[Claims](func() time.Time {
 			return nowTime
 		}),
-		jwtcore.WithAddParserOption[Claims, *Claims](jwt.WithTimeFunc(
+		jwtcore.WithAddParserOption[Claims](jwt.WithTimeFunc(
 			func() time.Time { return nowTime },
 		)),
 	)
 
-	type testCase[T jwt.Claims, PT jwtcore.Claims[T]] struct {
+	type testCase[T jwt.Claims] struct {
 		name       string
-		h          *RefreshManager[T, PT]
+		h          *RefreshManager[T]
 		reqBuilder func(t *testing.T) *http.Request
 		wantCode   int
 		after      func(t *testing.T, recorder *httptest.ResponseRecorder)
 	}
-	tests := []testCase[Claims, *Claims]{
+	tests := []testCase[Claims]{
 		{
 			// 更新资源令牌并轮换刷新令牌
 			name: "refresh_access_token_and_rotate_refresh_token",
-			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
-				WithRotateRefreshToken[Claims, *Claims](true)),
+			h: NewRefreshManager[Claims](accessTM, refreshTM,
+				WithRotateRefreshToken[Claims](true)),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
 				require.NoError(t, err)
@@ -72,11 +72,11 @@ func TestRefreshManager_Handler(t *testing.T) {
 		{
 			// 更新资源令牌但轮换刷新令牌生成失败
 			name: "refresh_access_token_but_gen_rotate_refresh_token_failed",
-			h: NewRefreshManager[Claims, *Claims](accessTM, &testTokenManager{
+			h: NewRefreshManager[Claims](accessTM, &testTokenManager{
 				generateErr:  errors.New("模拟生成 refresh token 失败"),
 				verifyClaims: Claims{Uid: 1},
 				verifyErr:    nil,
-			}, WithRotateRefreshToken[Claims, *Claims](true)),
+			}, WithRotateRefreshToken[Claims](true)),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
 				require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestRefreshManager_Handler(t *testing.T) {
 		{
 			// 仅更新资源令牌
 			name: "refresh_access_token",
-			h:    NewRefreshManager[Claims, *Claims](accessTM, refreshTM),
+			h:    NewRefreshManager[Claims](accessTM, refreshTM),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
 				require.NoError(t, err)
@@ -105,7 +105,7 @@ func TestRefreshManager_Handler(t *testing.T) {
 		{
 			// 生成资源令牌失败
 			name: "gen_access_token_failed",
-			h: NewRefreshManager[Claims, *Claims](&testTokenManager{
+			h: NewRefreshManager[Claims](&testTokenManager{
 				generateErr:  errors.New("模拟生成 access token 失败"),
 				verifyClaims: Claims{Uid: 1},
 			}, refreshTM),
@@ -121,8 +121,8 @@ func TestRefreshManager_Handler(t *testing.T) {
 		{
 			// 获取 claims 失败
 			name: "failed_to_obtain_claims",
-			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
-				WithRefreshAuthHandler[Claims, *Claims](func(c *gin.Context) {
+			h: NewRefreshManager[Claims](accessTM, refreshTM,
+				WithRefreshAuthHandler[Claims](func(c *gin.Context) {
 					return
 				}),
 			),
@@ -138,8 +138,8 @@ func TestRefreshManager_Handler(t *testing.T) {
 		{
 			// 认证失败直接中断执行
 			name: "unauthorized",
-			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
-				WithRotateRefreshToken[Claims, *Claims](true)),
+			h: NewRefreshManager[Claims](accessTM, refreshTM,
+				WithRotateRefreshToken[Claims](true)),
 			reqBuilder: func(t *testing.T) *http.Request {
 				req, err := http.NewRequest(http.MethodGet, "/refresh", nil)
 				require.NoError(t, err)
@@ -151,8 +151,8 @@ func TestRefreshManager_Handler(t *testing.T) {
 		},
 		{
 			name: "change_option",
-			h: NewRefreshManager[Claims, *Claims](accessTM, refreshTM,
-				WithRefreshAuthHandler[Claims, *Claims](
+			h: NewRefreshManager[Claims](accessTM, refreshTM,
+				WithRefreshAuthHandler[Claims](
 					NewMiddlewareBuilder[Claims](refreshTM).SetClaimsFunc(
 						func(c *gin.Context, claims Claims) {
 							ctx := context.WithValue(c.Request.Context(), "claims", claims)
@@ -160,21 +160,21 @@ func TestRefreshManager_Handler(t *testing.T) {
 						},
 					).Build(),
 				),
-				WithGetClaims[Claims, *Claims](func(c *gin.Context) (Claims, bool) {
+				WithGetClaims[Claims](func(c *gin.Context) (Claims, bool) {
 					v := c.Request.Context().Value("claims")
 					clm, ok := v.(Claims)
 					return clm, ok
 				}),
-				WithAccessTokenSetter[Claims, *Claims](func(c *gin.Context, token string) {
+				WithAccessTokenSetter[Claims](func(c *gin.Context, token string) {
 					ctx := context.WithValue(c.Request.Context(), "access-token", token)
 					c.Request = c.Request.WithContext(ctx)
 				}),
-				WithRotateRefreshToken[Claims, *Claims](true),
-				WithRefreshTokenSetter[Claims, *Claims](func(c *gin.Context, token string) {
+				WithRotateRefreshToken[Claims](true),
+				WithRefreshTokenSetter[Claims](func(c *gin.Context, token string) {
 					ctx := context.WithValue(c.Request.Context(), "refresh-token", token)
 					c.Request = c.Request.WithContext(ctx)
 				}),
-				WithResponseSetter[Claims, *Claims](func(c *gin.Context) {
+				WithResponseSetter[Claims](func(c *gin.Context) {
 					v1 := c.Request.Context().Value("access-token")
 					accessToken, ok := v1.(string)
 					if !ok {
