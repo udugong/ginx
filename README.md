@@ -20,12 +20,11 @@ go versions
 
 # `auth` package
 
-该`auth`包提供了一些有用的方法，使您可以在使用 gin
-时快速完成认证功能。
+该`auth`包提供了一些有用的方法，使您可以在使用 gin 时快速完成用户认证功能。
 
-- [jwt 认证](#auth/jwt)
+- [jwt 认证](#jwt-认证)
 
-## auth/jwt
+## jwt 认证
 
 该`jwt`包提供了 jwt 认证功能。该功能借助了 [token/jwtcore](https://github.com/udugong/token) 包的 jwt 生成/校验功能实现。
 
@@ -135,6 +134,14 @@ go versions
      	}),
      )
      ```
+   
+5. 获取 Claims
+
+   Claims 默认存放在 context.Context 中。对外提供了 `ClaimsFromContext` 方法获取 Claims。如果不存在 Claims 或者类型错误则会返回 false。
+
+   ```go
+   ujwt.ClaimsFromContext[Claims](c.Request.Context()) // context.Context 存放于 *gin.Context.Request.Context() 中
+   ```
 
 #### 示例
 
