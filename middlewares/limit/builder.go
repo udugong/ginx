@@ -1,7 +1,7 @@
-package ratelimit
+package limit
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,28 +11,23 @@ import (
 type Builder struct {
 	limiter  Limiter
 	genKeyFn func(ctx *gin.Context) string
-	logFn    func(msg any, args ...any)
+	logger   *slog.Logger
 }
 
 // NewBuilder
 // genKeyFn: 默认使用 IP 限流.
-// logFn: 默认使用 log.Println().
 func NewBuilder(limiter Limiter) *Builder {
 	return &Builder{
 		limiter: limiter,
 		genKeyFn: func(ctx *gin.Context) string {
 			var b strings.Builder
-			b.WriteString("ip-limiter")
-			b.WriteString(":")
-			b.WriteString(ctx.ClientIP())
+			ip := ctx.ClientIP()
+			b.Grow(11 + len(ip))
+			b.WriteString("ip-limiter:")
+			b.WriteString(ip)
 			return b.String()
 		},
-		logFn: func(msg any, args ...any) {
-			v := make([]any, 0, len(args)+1)
-			v = append(v, msg)
-			v = append(v, args...)
-			log.Println(v...)
-		},
+		logger: slog.Default(),
 	}
 }
 
@@ -41,8 +36,8 @@ func (b *Builder) SetKeyGenFunc(fn func(*gin.Context) string) *Builder {
 	return b
 }
 
-func (b *Builder) SetLogFunc(fn func(msg any, args ...any)) *Builder {
-	b.logFn = fn
+func (b *Builder) SetLogger(logger *slog.Logger) *Builder {
+	b.logger = logger
 	return b
 }
 
@@ -50,7 +45,8 @@ func (b *Builder) Build() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		limited, err := b.limit(ctx)
 		if err != nil {
-			b.logFn(err)
+			b.logger.LogAttrs(ctx.Request.Context(), slog.LevelError,
+				"限流器出现错误", slog.Any("err", err))
 			ctx.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}

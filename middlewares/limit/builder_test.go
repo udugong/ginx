@@ -1,8 +1,9 @@
-package ratelimit
+package limit
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -215,24 +216,24 @@ func (b *Builder) RegisterRoutes(server *gin.Engine) {
 	})
 }
 
-func TestBuilder_SetLogFunc(t *testing.T) {
-	var l func(msg any, args ...any)
+func TestBuilder_SetLogger(t *testing.T) {
+	var l *slog.Logger
 	tests := []struct {
 		name string
-		fn   func(msg any, args ...any)
-		want *func(msg any, args ...any)
+		fn   *slog.Logger
+		want *slog.Logger
 	}{
 		{
 			name: "normal",
 			fn:   l,
-			want: &l,
+			want: l,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := NewBuilder(&testLimiter{})
-			b.SetLogFunc(tt.fn).Build()
-			assert.Equal(t, tt.want, &b.logFn)
+			b.SetLogger(tt.fn).Build()
+			assert.Equal(t, tt.want, b.logger)
 		})
 	}
 }
