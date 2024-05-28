@@ -1,4 +1,4 @@
-package limit
+package slidewindowlimit
 
 import (
 	"log/slog"
@@ -15,17 +15,12 @@ type Builder struct {
 }
 
 // NewBuilder
-// genKeyFn: 默认使用 IP 限流.
+// genKeyFn: 默认全局限流.
 func NewBuilder(limiter Limiter) *Builder {
 	return &Builder{
 		limiter: limiter,
 		genKeyFn: func(ctx *gin.Context) string {
-			var b strings.Builder
-			ip := ctx.ClientIP()
-			b.Grow(11 + len(ip))
-			b.WriteString("ip-limiter:")
-			b.WriteString(ip)
-			return b.String()
+			return "all_req_rate_limiter"
 		},
 		logger: slog.Default(),
 	}
@@ -38,6 +33,20 @@ func (b *Builder) SetKeyGenFunc(fn func(*gin.Context) string) *Builder {
 
 func (b *Builder) SetLogger(logger *slog.Logger) *Builder {
 	b.logger = logger
+	return b
+}
+
+// SetKeyGenFuncByIP 设置根据 IP 进行限流
+func (b *Builder) SetKeyGenFuncByIP() *Builder {
+	b.genKeyFn = func(ctx *gin.Context) string {
+		var b strings.Builder
+		key := "ip_rate_limiter:"
+		ip := ctx.ClientIP()
+		b.Grow(len(key) + len(ip))
+		b.WriteString(key)
+		b.WriteString(ip)
+		return b.String()
+	}
 	return b
 }
 

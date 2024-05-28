@@ -1,4 +1,4 @@
-package limit
+package slidewindowlimit
 
 import (
 	"context"
@@ -46,7 +46,7 @@ func TestBuilder_SetKeyGenFunc(t *testing.T) {
 				req.RemoteAddr = "127.0.0.1:80"
 				return req
 			},
-			want: "ip-limiter:127.0.0.1",
+			want: "all_req_rate_limiter",
 		},
 	}
 	for _, tt := range tests {
@@ -54,6 +54,80 @@ func TestBuilder_SetKeyGenFunc(t *testing.T) {
 			b := NewBuilder(nil)
 			if tt.fn != nil {
 				b.SetKeyGenFunc(tt.fn)
+			}
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			req := tt.reqBuilder(t)
+			ctx.Request = req
+
+			assert.Equal(t, tt.want, b.genKeyFn(ctx))
+		})
+	}
+}
+
+func TestBuilder_SetLogger(t *testing.T) {
+	var l *slog.Logger
+	tests := []struct {
+		name string
+		fn   *slog.Logger
+		want *slog.Logger
+	}{
+		{
+			name: "normal",
+			fn:   l,
+			want: l,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBuilder(&testLimiter{})
+			b.SetLogger(tt.fn).Build()
+			assert.Equal(t, tt.want, b.logger)
+		})
+	}
+}
+
+func TestBuilder_SetKeyGenFuncByIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		reqBuilder func(t *testing.T) *http.Request
+		useIP      bool
+		want       string
+	}{
+		{
+			// 设置key成功
+			name: "set_key_success",
+			reqBuilder: func(t *testing.T) *http.Request {
+				req, err := http.NewRequest(http.MethodGet, "", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.RemoteAddr = "127.0.0.1:80"
+				return req
+			},
+			useIP: true,
+			want:  "ip_rate_limiter:127.0.0.1",
+		},
+		{
+			// 默认key
+			name: "default_key",
+			reqBuilder: func(t *testing.T) *http.Request {
+				req, err := http.NewRequest(http.MethodGet, "", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.RemoteAddr = "127.0.0.1:80"
+				return req
+			},
+			want: "all_req_rate_limiter",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBuilder(nil)
+			if tt.useIP {
+				b.SetKeyGenFuncByIP()
 			}
 
 			recorder := httptest.NewRecorder()
@@ -139,103 +213,10 @@ func TestBuilder_Build(t *testing.T) {
 	}
 }
 
-func TestBuilder_limit(t *testing.T) {
-	testLimiter := &testLimiter{}
-	tests := []struct {
-		name       string
-		limited    bool
-		limiterErr error
-		reqBuilder func(t *testing.T) *http.Request
-		// 预期响应
-		want    bool
-		wantErr error
-	}{
-		{
-			name: "不限流",
-			reqBuilder: func(t *testing.T) *http.Request {
-				req, err := http.NewRequest(http.MethodGet, "", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				req.RemoteAddr = "127.0.0.1:80"
-				return req
-			},
-			want: false,
-		},
-		{
-			name:       "限流",
-			limited:    true,
-			limiterErr: nil,
-			reqBuilder: func(t *testing.T) *http.Request {
-				req, err := http.NewRequest(http.MethodGet, "", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				req.RemoteAddr = "127.0.0.1:80"
-				return req
-			},
-			want: true,
-		},
-		{
-			name:       "限流代码出错",
-			limited:    false,
-			limiterErr: errors.New("模拟系统错误"),
-			reqBuilder: func(t *testing.T) *http.Request {
-				req, err := http.NewRequest(http.MethodGet, "", nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				req.RemoteAddr = "127.0.0.1:80"
-				return req
-			},
-			want:    false,
-			wantErr: errors.New("模拟系统错误"),
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testLimiter.limited = tt.limited
-			testLimiter.err = tt.limiterErr
-			b := NewBuilder(testLimiter)
-
-			recorder := httptest.NewRecorder()
-			ctx, _ := gin.CreateTestContext(recorder)
-			req := tt.reqBuilder(t)
-			ctx.Request = req
-
-			got, err := b.limit(ctx)
-			assert.Equal(t, tt.wantErr, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func (b *Builder) RegisterRoutes(server *gin.Engine) {
 	server.GET("/limit", func(ctx *gin.Context) {
 		ctx.Status(http.StatusOK)
 	})
-}
-
-func TestBuilder_SetLogger(t *testing.T) {
-	var l *slog.Logger
-	tests := []struct {
-		name string
-		fn   *slog.Logger
-		want *slog.Logger
-	}{
-		{
-			name: "normal",
-			fn:   l,
-			want: l,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := NewBuilder(&testLimiter{})
-			b.SetLogger(tt.fn).Build()
-			assert.Equal(t, tt.want, b.logger)
-		})
-	}
 }
 
 type testLimiter struct {
