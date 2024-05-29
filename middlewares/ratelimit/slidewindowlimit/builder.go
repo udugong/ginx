@@ -68,5 +68,5 @@ func (b *Builder) Build() gin.HandlerFunc {
 }
 
 func (b *Builder) limit(ctx *gin.Context) (bool, error) {
-	return b.limiter.Limit(ctx, b.genKeyFn(ctx))
+	return b.limiter.Limit(ctx.Request.Context(), b.genKeyFn(ctx))
 }
