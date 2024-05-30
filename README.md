@@ -14,7 +14,7 @@ go versions
 下载安装：`go get github.com/udugong/ginx@latest`
 
 * [auth 认证](#auth-package)
-* [limit 限流](#limit-限流)
+* [limit 限流](#limit-package)
 
 
 
@@ -244,12 +244,19 @@ func main() {
 
 
 
-# `limit` 限流
+# `limit` package
 
-limit 为 gin 提供了限流中间件，使您快速完成针对 IP 的限流，您也可以设置不同的
-key 来实现不同的限流。
+该`limit`包为 gin 提供了限流中间件，使您快速完成全局的限流或者针对 IP 的限流。
 
 在 [limiter](https://github.com/udugong/limiter) 仓库中提供了 `Limiter` 接口的实现。
+
+- [滑动窗口限流](#滑动窗口限流)
+- [活跃请求数限流](#活跃请求数限流)
+- [桶限流](#桶限流)
+
+
+
+## 滑动窗口限流
 
 ```go
 package main
@@ -260,27 +267,34 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"github.com/udugong/limiter/ratelimit"
-
-	"github.com/udugong/ginx/middlewares/limit"
+	limit "github.com/udugong/ginx/middlewares/ratelimit/slidewindowlimit"
+	"github.com/udugong/limiter/slidewindowlimit"
 )
 
 func main() {
 	rdb := InitRedis()
 	// github.com/udugong/limiter 中提供了一些 Limiter 接口的实现
-	// 这里使用 ratelimit 创建一个基于 redis, 1000/s 的限流器
-	limiter := ratelimit.NewRedisSlidingWindowLimiter(rdb, time.Second, 1000)
+	// 这里使用 slidewindowlimit 创建一个基于 redis, 1000/s 的滑动窗口限流器
+	limiter := slidewindowlimit.NewRedisSlidingWindowLimiter(rdb, time.Second, 1000)
+
+	// 本地滑动窗口限流 import "github.com/udugong/ukit/queue"
+	// q := queue.NewCircularQueue[time.Time](1000)
+	// limiter := slidewindowlimit.NewLocalSlideWindowLimiter(time.Second, q)
+
 	builder := limit.NewBuilder(limiter)
 
 	r := gin.Default()
-	// 默认是根据 IP 限流
-	// 每个 IP 每秒 最多访问 1000次
+	// 默认是全局限流
+	// 控制所有的请求的速率 最多访问 1000次
 	// r.Use(builder.Build())
 
-	// 控制所有的请求的速率
-	r.Use(builder.SetKeyGenFunc(func(*gin.Context) string {
-		return "all-request" // 设置 redis 的 key
-	}).Build())
+	// 根据 IP 限流
+	// 每个 IP 每秒 最多访问 1000次
+	routes := r.Use(builder.SetKeyGenFuncByIP().Build())
+	routes.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, "ok")
+	})
+	r.Run()
 }
 
 func InitRedis() redis.Cmdable {
@@ -299,3 +313,111 @@ func InitRedis() redis.Cmdable {
 }
 
 ```
+
+
+
+## 活跃请求数限流
+
+```go
+package main
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	limit "github.com/udugong/ginx/middlewares/ratelimit/activelimit"
+	"github.com/udugong/limiter/activelimit"
+)
+
+func main() {
+	rdb := InitRedis()
+	// github.com/udugong/limiter 中提供了一些 Limiter 接口的实现
+	// 这里使用 activelimit 创建一个基于 redis, 最大活跃请求数为 10 的活跃请求数限流器
+	limiter := activelimit.NewRedisActiveLimiter(rdb, 10)
+
+	// 本地活跃请求数限流
+	// limiter := activelimit.NewLocalActiveLimiter(10)
+
+	builder := limit.NewBuilder(limiter)
+
+	r := gin.Default()
+	// 默认是全局限流
+	// 控制所有的活跃请求 最多有 10 个请求
+	// r.Use(builder.Build())
+
+	// 根据 IP 限流
+	// 每个 IP 每最多 10 个活跃请求
+	routes := r.Use(builder.SetKeyGenFuncByIP().Build())
+	routes.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, "ok")
+	})
+	r.Run()
+}
+
+func InitRedis() redis.Cmdable {
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		panic(err)
+	}
+	return rdb
+}
+
+```
+
+
+
+## 桶限流
+
+在初始化时可以使用 [limiter](https://github.com/udugong/limiter) 仓库提供的漏桶限流或者令牌桶限流。
+
+- 无令牌时阻塞
+- 无令牌时返回
+
+```go
+package main
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	limit "github.com/udugong/ginx/middlewares/ratelimit/bucketlimit"
+	"github.com/udugong/limiter/bucketlimit"
+)
+
+func main() {
+	// github.com/udugong/limiter 中提供了一些 Limiter 接口的实现
+	// 这里使用 bucketlimit 创建一个漏桶限流
+	limiter := bucketlimit.NewLeakyBucketLimiter(time.Second)
+
+	// 令牌桶限流: 每秒生成一个令牌,桶内最多3枚令牌
+	// limiter := bucketlimit.NewTokenBucketLimiter(time.Second, 3)
+
+	builder := limit.NewBuilder(limiter)
+
+	r := gin.Default()
+
+	// 无令牌时返回,没有令牌时直接返回 429
+	routes := r.Use(builder.Build())
+
+	// 无令牌时阻塞,直到超时
+	// routes := r.Use(builder.BuildBlock())
+
+	routes.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, "ok")
+	})
+	r.Run()
+}
+
+```
+
